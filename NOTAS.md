@@ -51,3 +51,11 @@ Ejecutar `sondeo/sondeo_ipc.js` en PT 6.0.1 y volcar la salida para conocer la A
 - `commandLog`: getEntryAt/getEntryCount/setEnabled/clear.
 - `addDevice(0,"2911",100,100)` -> "Invalid arguments": las firmas reales aún no se conocen (sondeo 3).
 - Los argumentos IPC llegan como texto ("0","2911",...).
+
+## Resultado del sondeo 3 y búsqueda en PacketTracer6.exe
+- `lw.addDevice(...)` es solo `this._parser.ipcCall('addDevice', arguments)`; `_parser` = className, createObject, ipcCall, uuid (no describe firmas).
+- Un error de IPC dentro de un script aborta toda la ejecución (try/catch no lo captura). Para probar llamadas sueltas usar el cuadro de entrada de la ventana Debug.
+- `addDevice(0,"2911",100,100)` -> "Invalid arguments" (privilegios OK). Firma real aún desconocida.
+- El .exe contiene solo los nombres de métodos de LogicalWorkspace (no tipos de parámetros), más el evento `deviceAdded(name, model)` / `deviceRemoved(name)`.
+- Modelos internos vistos en el .exe: PC-PT, Laptop-PT, TV-PT, TabletPC-PT, Pda-PT, WirelessEndDevice-PT, WiredEndDevice-PT.
+- Plan: registrar `deviceAdded` y arrastrar dispositivos a mano para ver la cadena exacta de `model` que usa la 6.0.1.
