@@ -69,3 +69,12 @@ Ejecutar `sondeo/sondeo_ipc.js` en PT 6.0.1 y volcar la salida para conocer la A
 - `lw.addDevice(type, model, x, y)` sigue dando Invalid arguments con (0,"2911",100,100), (1,"2960-24TT",300,100), (8,"PC-PT",100,200), con decimales y con 3 argumentos. Pendiente: firma real.
 - Los argumentos IPC se serializan como `nombre("a","b",...)` (todo entre comillas); un error IPC detiene el script (el depurador captura la excepción).
 - Doc pública de la API: https://tutorials.ptnetacad.net/help/default/IpcAPI/class_logical_workspace.html (bloqueada desde el entorno del asistente).
+
+## HITO: addDevice funciona en la 6.0.1 con DOS argumentos
+- `lw.addDevice(0, "2911")` -> devuelve el nombre auto (ej. `Router2`) y dispara `deviceAdded`.
+  Con coordenadas (4 args), nombre extra o cualquier otra forma -> "Invalid arguments".
+  (La doc moderna y PTBuilder usan `addDevice(type, model, x, y)`; la 6.0.1 no.)
+- Posición: usar después `device.moveToLocation(x, y)` (existe en `device`); nombre: `device.setName(n)`.
+- Receta mínima ya validada: addDevice(type, model) -> setName -> moveToLocation -> createLink(..., 8100) -> enterCommand.
+- Tipos para addDevice: 0 router, 1 switch, 8 PC (los de `getType()`); laptop = 17 en la 6.0.1 (PTBuilder usa 18 en PT modernos).
+- Pendiente: canal de comunicación con el exterior (sondeo/sondeo4_canal.js: ¿systemFileManager? ¿web view con XHR?).
