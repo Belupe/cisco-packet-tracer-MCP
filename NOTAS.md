@@ -41,3 +41,13 @@ Ejecutar `sondeo/sondeo_ipc.js` en PT 6.0.1 y volcar la salida para conocer la A
 - Modelos vistos: Router-PT-Empty, Switch-PT-Empty, PC-PT, Server-PT, Laptop-PT, AccessPoint-PT, AccessPoint-PT-A.
 - Tipos: 0 router, 1 switch, 7 AP, 8 PC, 9 server, 17 laptop.
 - Pendiente: crear dispositivos/cables (probablemente `getActiveWorkspace().getLogicalWorkspace()`) -> `sondeo/sondeo2_ipc.js`.
+
+## Resultado del sondeo 2 (PT 6.0.1.0011)
+- `appWindow.getVersion()` = `6.0.1.0011`; base path `C:/Program Files (x86)/Cisco Packet Tracer 6.0.1`.
+- `getActiveWorkspace().getLogicalWorkspace()` expone: addDevice, createLink, deleteLink, removeDevice, addNote, drawLine/drawCircle,
+  getCanvasItemIds, moveCanvasItemBy, getWorkspaceImage, getState...
+- `commandLine` (terminal): enterCommand, enterChar, getOutput, getPrompt, getMode, getCommandInput, historiales.
+- `link`: getPort1, getPort2, getOtherPort, getLinkType, getConnectionType.
+- `commandLog`: getEntryAt/getEntryCount/setEnabled/clear.
+- `addDevice(0,"2911",100,100)` -> "Invalid arguments": las firmas reales aún no se conocen (sondeo 3).
+- Los argumentos IPC llegan como texto ("0","2911",...).
