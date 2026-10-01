@@ -59,3 +59,13 @@ Ejecutar `sondeo/sondeo_ipc.js` en PT 6.0.1 y volcar la salida para conocer la A
 - El .exe contiene solo los nombres de métodos de LogicalWorkspace (no tipos de parámetros), más el evento `deviceAdded(name, model)` / `deviceRemoved(name)`.
 - Modelos internos vistos en el .exe: PC-PT, Laptop-PT, TV-PT, TabletPC-PT, Pda-PT, WirelessEndDevice-PT, WiredEndDevice-PT.
 - Plan: registrar `deviceAdded` y arrastrar dispositivos a mano para ver la cadena exacta de `model` que usa la 6.0.1.
+
+## Resultado de pruebas en la ventana Debug (PT 6.0.1.0011)
+- Escrituras funcionan: `device.setName()` OK, `lw.removeDevice("nombre")` -> true.
+- `lw.createLink("Router1","GigabitEthernet0/0","Switch1","FastEthernet0/1",8100)` -> true (**cable como entero**; con `"auto"` da Invalid arguments).
+  Enum de cables (según repo de referencia): 8100 straight, 8101 cross, 8102 roll, 8103 fiber, 8104 phone, 8105 cable, 8106 serial, 8107 auto, 8108 console.
+- Evento `lw.registerEvent("deviceAdded", null, function(src,args){ args.name, args.model })` funciona; modelos internos: `2911`, `2960-24TT`, `PC-PT`, `Switch-PT-Empty`.
+- No existen globales `addDevice` ni `addLink` en la 6.0.1.
+- `lw.addDevice(type, model, x, y)` sigue dando Invalid arguments con (0,"2911",100,100), (1,"2960-24TT",300,100), (8,"PC-PT",100,200), con decimales y con 3 argumentos. Pendiente: firma real.
+- Los argumentos IPC se serializan como `nombre("a","b",...)` (todo entre comillas); un error IPC detiene el script (el depurador captura la excepción).
+- Doc pública de la API: https://tutorials.ptnetacad.net/help/default/IpcAPI/class_logical_workspace.html (bloqueada desde el entorno del asistente).
