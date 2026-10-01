@@ -85,3 +85,5 @@ Ejecutar `sondeo/sondeo_ipc.js` en PT 6.0.1 y volcar la salida para conocer la A
 - Canal elegido: web view (QtWebKit) con polling HTTP a un servidor local; el panel llama a `$se("runCode", ...)`.
 - Consola de un router nuevo: prompt `Continue with configuration dialog? [yes/no]:` -> enviar `no` antes de configurar.
 - Prototipo en `prototipo/` (servidor.py + script_engine.js + interface.html). SIN token todavía: añadir autenticación antes de uso real.
+- Servidor alternativo en PowerShell (`prototipo/servidor.ps1` + cliente `prototipo/pt.ps1`), sin admin ni Python.
+  Diseño sin hilos: `/run` devuelve un id y el cliente consulta `/get?id=N`. Sin probar todavía en Windows.

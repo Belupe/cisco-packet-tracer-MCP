@@ -40,7 +40,7 @@ function poll() {
       catch (e) { onResult(id, "ERROR $se: " + e); }
       setTimeout(poll, 0);
     } else if (x.status == 204) {
-      setTimeout(poll, 0);
+      setTimeout(poll, 250);
     } else {
       setTimeout(poll, 1000);
     }
