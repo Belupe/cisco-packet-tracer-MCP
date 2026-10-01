@@ -29,3 +29,15 @@ que ejecuta el JavaScript dentro de Packet Tracer.
 
 ## Siguiente paso
 Ejecutar `sondeo/sondeo_ipc.js` en PT 6.0.1 y volcar la salida para conocer la API real.
+
+## Resultado del sondeo 1 (PT 6.0.1.0011)
+- `ipc`: appWindow, commandLog, ipcManager, multiUserManager, network, simulation.
+- `network`: solo getDevice / getDeviceAt / getDeviceCount (no crea dispositivos).
+- `device` (81 métodos): enterCommand, getCommandLine, addModule/removeModule, addSubInt, setHostName, setEnableSecret,
+  setBannerMotd, addUserPass, setPower, moveToLocation, serializeToXml, getPort/getPortAt/getPortCount, getModel, getType...
+- `port` (108 métodos): IPv4/IPv6, OSPF (coste, timers, md5), EIGRP pasivo, RIP, ACL in/out, NAT, DHCP client, ancho de banda, duplex, getLink.
+- `appWindow` (69 métodos): fileNew/Open/Save/SaveAs, getActiveWorkspace, getVersion, isRealtime/Simulation/LogicalMode...
+- `simulation`: isSimulationMode, getFrameInstanceAt/Count.
+- Modelos vistos: Router-PT-Empty, Switch-PT-Empty, PC-PT, Server-PT, Laptop-PT, AccessPoint-PT, AccessPoint-PT-A.
+- Tipos: 0 router, 1 switch, 7 AP, 8 PC, 9 server, 17 laptop.
+- Pendiente: crear dispositivos/cables (probablemente `getActiveWorkspace().getLogicalWorkspace()`) -> `sondeo/sondeo2_ipc.js`.
