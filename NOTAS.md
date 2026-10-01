@@ -94,3 +94,9 @@ Ejecutar `sondeo/sondeo_ipc.js` en PT 6.0.1 y volcar la salida para conocer la A
   panel (http) hace polling a `/next` y guarda en `pending`; engine llama `__take()`, ejecuta `eval(code)` y responde con `__result(id, enc)`.
 - Código y resultado codificados con `encodeURIComponent`. `servidor.ps1` + `pt.ps1` probados por el usuario hasta la entrega al panel.
 - Miembros de WebView: evaluateJavaScript(Async), evaluateCall(Async), setUrl, setHtml, show, hide, setGeometry, setWindowTitle, getWebViewId...
+
+## HITO: canal completo funcionando (PT 6.0.1.0011, probado por el usuario)
+- `pt.ps1 "ipc.network().getDeviceCount()"` -> `0` con el workspace vacío y `1` tras añadir un switch a mano.
+- Cadena validada: cliente PowerShell -> `servidor.ps1` (127.0.0.1:54321) -> panel web view (XHR) -> Script Engine (`evaluateJavaScript`) -> `ipc` -> resultado de vuelta.
+- Siguiente: (1) prueba de topología completa desde fuera (addDevice 2 args + setName + moveToLocation + createLink 8100 + consola con `no` al diálogo inicial),
+  (2) token/autenticación en el puente, (3) servidor MCP (Python) que use este puente, (4) catálogo de modelos de la 6.0.1.
