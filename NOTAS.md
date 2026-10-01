@@ -87,3 +87,10 @@ Ejecutar `sondeo/sondeo_ipc.js` en PT 6.0.1 y volcar la salida para conocer la A
 - Prototipo en `prototipo/` (servidor.py + script_engine.js + interface.html). SIN token todavía: añadir autenticación antes de uso real.
 - Servidor alternativo en PowerShell (`prototipo/servidor.ps1` + cliente `prototipo/pt.ps1`), sin admin ni Python.
   Diseño sin hilos: `/run` devuelve un id y el cliente consulta `/get?id=N`. Sin probar todavía en Windows.
+
+## Canal web view resuelto (diseño)
+- `$se`/`webView` NO existen en páginas `http://` (solo en interfaces `this-sm:`); `XMLHttpRequest` sí existe en el panel.
+- `WV.evaluateJavaScript("1+1")` DEVUELVE el valor (`2`) -> el Script Engine consulta al panel con `setInterval`:
+  panel (http) hace polling a `/next` y guarda en `pending`; engine llama `__take()`, ejecuta `eval(code)` y responde con `__result(id, enc)`.
+- Código y resultado codificados con `encodeURIComponent`. `servidor.ps1` + `pt.ps1` probados por el usuario hasta la entrega al panel.
+- Miembros de WebView: evaluateJavaScript(Async), evaluateCall(Async), setUrl, setHtml, show, hide, setGeometry, setWindowTitle, getWebViewId...

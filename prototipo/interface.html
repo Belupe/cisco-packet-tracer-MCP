@@ -6,24 +6,37 @@
 <pre id="diag"></pre>
 <pre id="log"></pre>
 <script>
-var wvId = null;
-var diag = [];
-function d(s) { diag.push(s); document.getElementById("diag").textContent = diag.join("\n"); }
+// Esta pagina SOLO habla HTTP con el servidor local. El Script Engine de PT la
+// consulta con evaluateJavaScript("__take()") y le devuelve el resultado con
+// evaluateJavaScript("__result(id,'...')"). $se/webView no existen en paginas http.
+var pending = [];            // [{id, code}]
+var served = 0, finished = 0;
+
 function log(s) {
   var el = document.getElementById("log");
   el.textContent = (s + "\n" + el.textContent).substring(0, 2000);
+  document.getElementById("diag").textContent =
+    "XMLHttpRequest: " + typeof XMLHttpRequest + "\nrecibidos: " + served + "  terminados: " + finished;
 }
-d("typeof $se = " + typeof $se);
-d("typeof webView = " + typeof webView);
-d("typeof XMLHttpRequest = " + typeof XMLHttpRequest);
-try { wvId = webView.getWebViewId(); d("webViewId = " + wvId); } catch (e) { d("webViewId ERROR " + e); }
 
-// El Script Engine llama a esta funcion cuando termina de ejecutar el codigo.
-function onResult(id, res) {
+// Lo llama el Script Engine: devuelve "id:codigoCodificado" o "" si no hay nada.
+function __take() {
+  if (pending.length === 0) { return ""; }
+  var c = pending.shift();
+  served++;
+  log("#" + c.id + " <- " + c.code.substring(0, 160));
+  return c.id + ":" + encodeURIComponent(c.code);
+}
+
+// Lo llama el Script Engine con el resultado codificado.
+function __result(id, enc) {
+  var res = decodeURIComponent(enc);
+  finished++;
   var x = new XMLHttpRequest();
   x.open("POST", "/result?id=" + id, true);
-  x.send(String(res));
-  log("#" + id + " -> " + String(res).substring(0, 200));
+  x.send(res);
+  log("#" + id + " -> " + res.substring(0, 160));
+  return "ok";
 }
 
 function poll() {
@@ -34,10 +47,7 @@ function poll() {
     if (x.readyState != 4) { return; }
     if (x.status == 200) {
       var t = x.responseText, i = t.indexOf("\n");
-      var id = parseInt(t.substring(0, i), 10), code = t.substring(i + 1);
-      log("#" + id + " <- " + code.substring(0, 200));
-      try { $se("runCode", wvId, id, code); }
-      catch (e) { onResult(id, "ERROR $se: " + e); }
+      pending.push({ id: parseInt(t.substring(0, i), 10), code: t.substring(i + 1) });
       setTimeout(poll, 0);
     } else if (x.status == 204) {
       setTimeout(poll, 250);
@@ -48,5 +58,6 @@ function poll() {
   x.ontimeout = function () { setTimeout(poll, 500); };
   x.send();
 }
+log("panel listo");
 poll();
 </script></body></html>
