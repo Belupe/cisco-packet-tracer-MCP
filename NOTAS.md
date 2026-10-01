@@ -78,3 +78,10 @@ Ejecutar `sondeo/sondeo_ipc.js` en PT 6.0.1 y volcar la salida para conocer la A
 - Receta mínima ya validada: addDevice(type, model) -> setName -> moveToLocation -> createLink(..., 8100) -> enterCommand.
 - Tipos para addDevice: 0 router, 1 switch, 8 PC (los de `getType()`); laptop = 17 en la 6.0.1 (PTBuilder usa 18 en PT modernos).
 - Pendiente: canal de comunicación con el exterior (sondeo/sondeo4_canal.js: ¿systemFileManager? ¿web view con XHR?).
+
+## Sondeo 4 (canal con el exterior) y consola
+- Script Engine 6.0.1: SIN `systemFileManager` y SIN `XMLHttpRequest` -> no hay buzón de archivos.
+  Sí: `webViewManager.createWebView(titulo, url, w, h)`, `$se`, `$wvc/$wvca`, `setInterval`, almacén de datos, `_ScriptModule.ipcCall...`.
+- Canal elegido: web view (QtWebKit) con polling HTTP a un servidor local; el panel llama a `$se("runCode", ...)`.
+- Consola de un router nuevo: prompt `Continue with configuration dialog? [yes/no]:` -> enviar `no` antes de configurar.
+- Prototipo en `prototipo/` (servidor.py + script_engine.js + interface.html). SIN token todavía: añadir autenticación antes de uso real.

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>PT-MCP local</title>
+<style>body{font:13px sans-serif;margin:10px}pre{background:#eee;padding:6px}</style></head>
+<body>
+<h3>PT-MCP local (prototipo)</h3>
+<pre id="diag"></pre>
+<pre id="log"></pre>
+<script>
+var wvId = null;
+var diag = [];
+function d(s) { diag.push(s); document.getElementById("diag").textContent = diag.join("\n"); }
+function log(s) {
+  var el = document.getElementById("log");
+  el.textContent = (s + "\n" + el.textContent).substring(0, 2000);
+}
+d("typeof $se = " + typeof $se);
+d("typeof webView = " + typeof webView);
+d("typeof XMLHttpRequest = " + typeof XMLHttpRequest);
+try { wvId = webView.getWebViewId(); d("webViewId = " + wvId); } catch (e) { d("webViewId ERROR " + e); }
+
+// El Script Engine llama a esta funcion cuando termina de ejecutar el codigo.
+function onResult(id, res) {
+  var x = new XMLHttpRequest();
+  x.open("POST", "/result?id=" + id, true);
+  x.send(String(res));
+  log("#" + id + " -> " + String(res).substring(0, 200));
+}
+
+function poll() {
+  var x = new XMLHttpRequest();
+  x.open("GET", "/next", true);
+  x.timeout = 8000;
+  x.onreadystatechange = function () {
+    if (x.readyState != 4) { return; }
+    if (x.status == 200) {
+      var t = x.responseText, i = t.indexOf("\n");
+      var id = parseInt(t.substring(0, i), 10), code = t.substring(i + 1);
+      log("#" + id + " <- " + code.substring(0, 200));
+      try { $se("runCode", wvId, id, code); }
+      catch (e) { onResult(id, "ERROR $se: " + e); }
+      setTimeout(poll, 0);
+    } else if (x.status == 204) {
+      setTimeout(poll, 0);
+    } else {
+      setTimeout(poll, 1000);
+    }
+  };
+  x.ontimeout = function () { setTimeout(poll, 500); };
+  x.send();
+}
+poll();
+</script></body></html>
