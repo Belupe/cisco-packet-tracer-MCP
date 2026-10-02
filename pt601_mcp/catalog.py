@@ -1,0 +1,85 @@
+"""Catalogo de dispositivos y cables para Packet Tracer 6.0.1.
+
+`verified=True`: el modelo se ha visto funcionar en una 6.0.1.0011 real.
+El resto sale de la ayuda local / imagenes de la instalacion y esta sin probar.
+Tipos (DeviceType) segun la API IPC; en la 6.0.1 se confirmo: router 0, switch 1,
+AP 7, PC 8, server 9, laptop 17.
+"""
+
+DEVICE_TYPES = {
+    "router": 0, "switch": 1, "cloud": 2, "bridge": 3, "hub": 4, "repeater": 5,
+    "splitter": 6, "accesspoint": 7, "pc": 8, "server": 9, "printer": 10,
+    "wireless_router": 11, "ip_phone": 12, "dsl_modem": 13, "cable_modem": 14,
+    "multilayer_switch": 16, "laptop": 17, "tablet": 18, "pda": 19,
+    "wireless_end_device": 20, "wired_end_device": 21, "tv": 22,
+}
+
+# modelo -> (tipo, verificado)
+_MODELS = {
+    # routers
+    "2911": ("router", True), "1841": ("router", False), "1941": ("router", False),
+    "2620XM": ("router", False), "2621XM": ("router", False), "2811": ("router", False),
+    "2901": ("router", False), "Router-PT": ("router", False),
+    "Router-PT-Empty": ("router", True),
+    # switches
+    "2960-24TT": ("switch", True), "2950-24": ("switch", False),
+    "2950T-24": ("switch", False), "Switch-PT": ("switch", False),
+    "Switch-PT-Empty": ("switch", True), "3560-24PS": ("multilayer_switch", False),
+    # finales y otros
+    "PC-PT": ("pc", True), "Server-PT": ("server", True), "Laptop-PT": ("laptop", True),
+    "AccessPoint-PT": ("accesspoint", True), "AccessPoint-PT-A": ("accesspoint", True),
+    "Printer-PT": ("printer", False), "Hub-PT": ("hub", False),
+    "Repeater-PT": ("repeater", False), "Bridge-PT": ("bridge", False),
+    "Cloud-PT": ("cloud", False), "Linksys-WRT300N": ("wireless_router", False),
+    "7960": ("ip_phone", False), "DSL-Modem-PT": ("dsl_modem", False),
+    "Cable-Modem-PT": ("cable_modem", False), "TabletPC-PT": ("tablet", False),
+    "Pda-PT": ("pda", False), "WirelessEndDevice-PT": ("wireless_end_device", False),
+    "WiredEndDevice-PT": ("wired_end_device", False), "TV-PT": ("tv", False),
+}
+
+_BY_UPPER = {m.upper(): m for m in _MODELS}
+
+# Tipos que arrancan con IOS y necesitan skipBoot() para estar listos al instante.
+BOOTING_TYPES = (0, 1, 16)
+
+CABLES = {
+    "straight": 8100, "cross": 8101, "crossover": 8101, "roll": 8102,
+    "fiber": 8103, "phone": 8104, "cable": 8105, "serial": 8106, "auto": 8107,
+    "console": 8108, "wireless": 8109, "coaxial": 8110, "usb": 8113,
+}
+
+
+class CatalogError(ValueError):
+    pass
+
+
+def resolve_model(model):
+    """Devuelve (modelo_canonico, device_type, verificado)."""
+    key = str(model).strip().upper()
+    if key not in _BY_UPPER:
+        raise CatalogError(
+            "Modelo desconocido: %r. Modelos: %s" % (model, ", ".join(sorted(_MODELS))))
+    canon = _BY_UPPER[key]
+    kind, verified = _MODELS[canon]
+    return canon, DEVICE_TYPES[kind], verified
+
+
+def cable_code(name):
+    if isinstance(name, int):
+        return name
+    key = str(name).strip().lower()
+    if key.isdigit():
+        return int(key)
+    if key not in CABLES:
+        raise CatalogError("Cable desconocido: %r. Opciones: %s" % (name, ", ".join(sorted(CABLES))))
+    return CABLES[key]
+
+
+def catalog_text():
+    lines = ["modelo | tipo | verificado en 6.0.1"]
+    for m in sorted(_MODELS):
+        kind, ok = _MODELS[m]
+        lines.append("%s | %s (%d) | %s" % (m, kind, DEVICE_TYPES[kind], "si" if ok else "no"))
+    lines.append("")
+    lines.append("cables: " + ", ".join("%s=%d" % kv for kv in sorted(CABLES.items(), key=lambda kv: kv[1])))
+    return "\n".join(lines)

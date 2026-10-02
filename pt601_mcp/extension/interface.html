@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>PT-MCP local</title>
+<style>body{font:13px sans-serif;margin:10px}pre{background:#eee;padding:6px}</style></head>
+<body>
+<h3>PT-MCP local &middot; Packet Tracer 6.0.1</h3>
+<pre id="diag"></pre>
+<pre id="log"></pre>
+<script>
+// Pagina servida por el propio servidor MCP; solo habla HTTP con el. El Script
+// Engine de PT la consulta con evaluateJavaScript("__take()") y le devuelve el
+// resultado con evaluateJavaScript("__result(id, ...)").
+var TOKEN = "__TOKEN__";
+var pending = [];
+var served = 0, finished = 0, lastError = "";
+
+function show() {
+  document.getElementById("diag").textContent =
+    "conexion: " + (lastError ? "ERROR " + lastError : "ok") +
+    "\nrecibidos: " + served + "  terminados: " + finished;
+}
+function log(s) {
+  var el = document.getElementById("log");
+  el.textContent = (s + "\n" + el.textContent).substring(0, 1500);
+  show();
+}
+
+function __take() {
+  if (pending.length === 0) { return ""; }
+  var c = pending.shift();
+  served++;
+  log("#" + c.id + " <- " + c.code.substring(0, 120));
+  return c.id + ":" + encodeURIComponent(c.code);
+}
+
+function __result(id, enc) {
+  var res = decodeURIComponent(enc);
+  finished++;
+  var x = new XMLHttpRequest();
+  x.open("POST", "/result?id=" + id + "&t=" + encodeURIComponent(TOKEN), true);
+  x.send(res);
+  log("#" + id + " -> " + res.substring(0, 120));
+  return "ok";
+}
+
+function poll() {
+  var x = new XMLHttpRequest();
+  x.open("GET", "/next?t=" + encodeURIComponent(TOKEN), true);
+  x.timeout = 8000;
+  x.onreadystatechange = function () {
+    if (x.readyState != 4) { return; }
+    if (x.status == 200) {
+      lastError = "";
+      var t = x.responseText, i = t.indexOf("\n");
+      pending.push({ id: parseInt(t.substring(0, i), 10), code: t.substring(i + 1) });
+      setTimeout(poll, 0);
+    } else if (x.status == 204) {
+      lastError = "";
+      setTimeout(poll, 250);
+    } else {
+      lastError = "HTTP " + x.status + " (reinicia el panel si cambiaste de servidor)";
+      show();
+      setTimeout(poll, 1500);
+    }
+  };
+  x.ontimeout = function () { lastError = "timeout"; setTimeout(poll, 500); };
+  x.send();
+}
+log("panel listo");
+poll();
+</script></body></html>

@@ -109,3 +109,9 @@ Lecciones para el constructor final:
 - `cl.enterCommand(...)` en routers es síncrono; en PCs `ping` devuelve al instante y la salida llega después: leer `cl.getOutput()` pasados unos segundos (y `isPortUp/isProtocolUp` para estado de enlaces).
 - Router nuevo: responder `no` y luego `""` al diálogo inicial; luego `enable` / `configure terminal`.
 - Cada comando de `pt.ps1` es independiente; las variables `lw`/`net` globales se definen una vez por arranque del módulo.
+
+## Servidor MCP propio: `pt601_mcp/` (v0.1.0)
+- Solo stdlib, protocolo MCP implementado a mano, puente HTTP con token + Host check, sin endpoint /run.
+- 12 herramientas (`pt_status`, `pt_add_device`, `pt_add_link`, `pt_cli`, `pt_ping`...). Catálogo con modelos verificados/sin verificar.
+- 20 pruebas offline (`tests/test_pt601.py`) + prueba e2e por stdio con panel simulado: OK.
+- Pendiente de validar en un PT real: arranque con Python portátil, conexión desde VS Code, y que el panel con token funcione en el web view.
