@@ -115,3 +115,12 @@ Lecciones para el constructor final:
 - 12 herramientas (`pt_status`, `pt_add_device`, `pt_add_link`, `pt_cli`, `pt_ping`...). Catálogo con modelos verificados/sin verificar.
 - 20 pruebas offline (`tests/test_pt601.py`) + prueba e2e por stdio con panel simulado: OK.
 - Pendiente de validar en un PT real: arranque con Python portátil, conexión desde VS Code, y que el panel con token funcione en el web view.
+
+## v0.2: herramientas de alto nivel, documentación y skill
+- Nuevas herramientas: `pt_build_topology` (plan JSON, autoposicionado, puertos automáticos, `@VECINO`), `pt_connect`, `pt_list_ports`,
+  `pt_config`, `pt_router_config` (interfaces/subinterfaces dot1q/static/OSPF/EIGRP/RIP/DHCP), `pt_switch_config` (VLAN/access/trunk/SVI),
+  `pt_dhcp_server`, `pt_dns_server`, `pt_describe`, `pt_clear_workspace`.
+- Servicios de Server-PT: basados en la API moderna (`getProcess("DhcpServerMain")`, `addNewPool`, `addIpAddress`) con tolerancia a variantes.
+  **SIN VALIDAR en la 6.0.1**: si fallan, `pt_describe device process=DhcpServerMain` lista los métodos reales.
+- Documentación: `pt601_mcp/README.md`, `pt601_mcp/docs/herramientas.md`, `pt601_mcp/docs/ejemplos.md`; skill en `skill/SKILL.md`.
+- 39 pruebas offline (`python3 -m unittest discover -s tests -v`).

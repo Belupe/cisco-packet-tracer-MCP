@@ -1,7 +1,10 @@
 """Herramientas MCP para Packet Tracer 6.0.1 (traducen llamadas a JavaScript del puente)."""
 import time
 
-from . import catalog, jsgen
+import json
+import re
+
+from . import catalog, ios, jsgen, plan as planmod
 from .bridge import BridgeError
 
 
@@ -62,6 +65,43 @@ class Tools:
             ("pt_ping",
              "Ejecuta ping desde un dispositivo y espera el resultado (los primeros paquetes pueden perderse por ARP/STP).",
              _obj({"device": S, "target": S, "wait_seconds": I}, ["device", "target"]), self.ping),
+            ("pt_list_ports", "Lista los puertos de un dispositivo y si estan libres o conectados.",
+             _obj({"device": S}, ["device"]), self.list_ports),
+            ("pt_connect",
+             "Conecta dos dispositivos ELIGIENDO PUERTOS LIBRES automaticamente (o los que indiques). "
+             "cable: auto (por defecto)|straight|cross|fiber.",
+             _obj({"device1": S, "device2": S, "cable": S, "port1": S, "port2": S}, ["device1", "device2"]),
+             self.connect),
+            ("pt_config",
+             "Aplica configuracion IOS multilinea a un router/switch (entra en enable + configure terminal y sale con end). "
+             "save=true guarda con 'write memory'.",
+             _obj({"device": S, "config": S, "save": B}, ["device", "config"]), self.config),
+            ("pt_router_config",
+             "Configura un router desde una descripcion: hostname, interfaces(port,ip,mask,vlan para subinterfaces), "
+             "static_routes, default_route, ospf, eigrp, rip, dhcp_pools, extra. Ver docs/herramientas.md.",
+             _obj({"device": S, "spec": {"type": "object"}}, ["device", "spec"]), self.router_config),
+            ("pt_switch_config",
+             "Configura un switch desde una descripcion: hostname, vlans, access_ports, trunk_ports, svi, extra.",
+             _obj({"device": S, "spec": {"type": "object"}}, ["device", "spec"]), self.switch_config),
+            ("pt_dhcp_server",
+             "Activa el servicio DHCP de un Server-PT y crea un pool (IP estatica del servidor: usa pt_set_ip).",
+             _obj({"device": S, "pool": S, "start_ip": S, "mask": S, "gateway": S, "dns": S, "max_users": I, "tftp": S},
+                  ["device", "start_ip", "mask"]), self.dhcp_server),
+            ("pt_dns_server",
+             "Activa el servicio DNS de un Server-PT y crea registros A. records=[{name, ip}].",
+             _obj({"device": S, "records": {"type": "array", "items": {"type": "object"}}}, ["device", "records"]),
+             self.dns_server),
+            ("pt_describe",
+             "Introspeccion: lista los metodos de un dispositivo, de uno de sus procesos (process='DhcpServerMain') o de un puerto.",
+             _obj({"device": S, "process": S, "port": S}, ["device"]), self.describe),
+            ("pt_build_topology",
+             "Construye una topologia COMPLETA desde un plan (devices, links, hosts, servers, routers, switches, cli) con "
+             "autoposicionado y puertos automaticos (usa port '@VECINO' en interfaces/puertos para referirte al puerto que enlaza con VECINO). "
+             "dry_run=true solo valida. Ver docs/ejemplos.md.",
+             _obj({"plan": {"type": "object"}, "dry_run": B}, ["plan"]), self.build_topology),
+            ("pt_clear_workspace",
+             "Borra TODOS los dispositivos. Exige confirm=true.",
+             _obj({"confirm": B}, ["confirm"]), self.clear_workspace),
             ("pt_eval",
              "AVANZADO: ejecuta JavaScript (Qt Script, estilo ES3) dentro de PT y devuelve String(resultado).",
              _obj({"code": S}, ["code"]), self.eval),
@@ -162,8 +202,9 @@ class Tools:
         commands = args.get("commands")
         if not isinstance(commands, list) or not commands:
             raise ToolError("commands debe ser una lista no vacia de textos")
+        timeout = max(self.js_timeout, 10 + 1.0 * len(commands))
         out = self._run(jsgen.cli(self._req(args, "device"), [str(c) for c in commands],
-                                  args.get("answer_initial_dialog", True)))
+                                  args.get("answer_initial_dialog", True)), timeout)
         return _clip(out)
 
     def read_output(self, args):
@@ -186,3 +227,164 @@ class Tools:
 
     def eval(self, args):
         return _clip(self._run(self._req(args, "code")))
+
+    # ---- herramientas de alto nivel ------------------------------------
+    def list_ports(self, args):
+        out = self._run(jsgen.list_ports(self._req(args, "device")))
+        rows = ["puerto | estado | up"]
+        rows += [" | ".join(line.split("\t")) for line in out.split("\n") if line.strip()]
+        return "\n".join(rows)
+
+    def connect(self, args):
+        try:
+            code = catalog.cable_code(args.get("cable") or "auto")
+        except catalog.CatalogError as exc:
+            raise ToolError(str(exc))
+        p1, p2 = args.get("port1") or "", args.get("port2") or ""
+        if code not in (8100, 8101, 8107, 8103) and not (p1 and p2):
+            raise ToolError("Para ese tipo de cable indica port1 y port2 explicitamente")
+        return self._run(jsgen.connect_auto(self._req(args, "device1"), self._req(args, "device2"), code, p1, p2))
+
+    def _send_config(self, device, commands, save=False):
+        commands = list(commands)
+        if save:
+            commands = commands[:-1] + ["end", "write memory"] if commands and commands[-1] == "end" else commands + ["write memory"]
+        return self.cli({"device": device, "commands": commands})
+
+    def config(self, args):
+        device = self._req(args, "device")
+        skip = ("enable", "configure terminal", "conf t", "end")
+        lines = [ln.strip() for ln in str(self._req(args, "config")).splitlines()
+                 if ln.strip() and ln.strip().lower() not in skip]
+        return self._send_config(device, ["enable", "configure terminal"] + lines + ["end"], bool(args.get("save")))
+
+    def router_config(self, args):
+        try:
+            cmds = ios.router_config(args.get("spec") or {})
+        except (ios.ConfigError, KeyError, ValueError) as exc:
+            raise ToolError("spec invalida: %s" % exc)
+        return self._send_config(self._req(args, "device"), cmds, bool(args.get("save")))
+
+    def switch_config(self, args):
+        try:
+            cmds = ios.switch_config(args.get("spec") or {})
+        except (ios.ConfigError, KeyError, ValueError) as exc:
+            raise ToolError("spec invalida: %s" % exc)
+        return self._send_config(self._req(args, "device"), cmds, bool(args.get("save")))
+
+    def dhcp_server(self, args):
+        try:
+            start, mask = ios.check_ip(self._req(args, "start_ip"), "start_ip"), ios.check_mask(self._req(args, "mask"))
+            gw = ios.check_ip(args["gateway"], "gateway") if args.get("gateway") else ""
+            dns = ios.check_ip(args["dns"], "dns") if args.get("dns") else ""
+            tftp = ios.check_ip(args["tftp"], "tftp") if args.get("tftp") else ""
+        except ios.ConfigError as exc:
+            raise ToolError(str(exc))
+        return self._run(jsgen.dhcp_server(self._req(args, "device"), args.get("pool") or "serverPool", gw, dns,
+                                           start, mask, int(args.get("max_users") or 50), tftp))
+
+    def dns_server(self, args):
+        records = args.get("records")
+        if not isinstance(records, list) or not records:
+            raise ToolError("records debe ser una lista [{name, ip}]")
+        try:
+            clean = [{"name": str(r["name"]).strip(), "ip": ios.check_ip(r["ip"], "registro %s" % r.get("name"))} for r in records]
+        except (KeyError, ios.ConfigError) as exc:
+            raise ToolError("registro invalido: %s" % exc)
+        return self._run(jsgen.dns_server(self._req(args, "device"), clean))
+
+    def describe(self, args):
+        return _clip(self._run(jsgen.describe(self._req(args, "device"), args.get("process") or "", args.get("port") or "")))
+
+    def clear_workspace(self, args):
+        if args.get("confirm") is not True:
+            raise ToolError("Operacion destructiva: vuelve a llamar con confirm=true")
+        return self._run(jsgen.clear_workspace())
+
+    # ---- constructor de topologias -------------------------------------
+    def build_topology(self, args):
+        plan = args.get("plan")
+        if isinstance(plan, str):
+            try:
+                plan = json.loads(plan)
+            except ValueError as exc:
+                raise ToolError("El plan no es JSON valido: %s" % exc)
+        errors = planmod.validate_plan(plan)
+        if errors:
+            raise ToolError("Plan invalido:\n- " + "\n- ".join(errors))
+        devices = [dict(d) for d in plan["devices"]]
+        positions = planmod.auto_layout(devices, plan.get("links", []))
+        for d in devices:
+            if d.get("x") is None or d.get("y") is None:
+                d["x"], d["y"] = positions[d["name"]]
+        if args.get("dry_run"):
+            return ("Plan valido: %d dispositivos, %d enlaces, %d hosts, %d servidores, %d routers, %d switches.\n"
+                    "Posiciones: %s" % (len(devices), len(plan.get("links", [])), len(plan.get("hosts", [])),
+                                        len(plan.get("servers", [])), len(plan.get("routers", [])),
+                                        len(plan.get("switches", [])),
+                                        ", ".join("%s(%d,%d)" % (d["name"], d["x"], d["y"]) for d in devices)))
+        report, ok, bad = [], [0], [0]
+
+        def step(label, fn):
+            try:
+                detail = fn()
+                ok[0] += 1
+                first = str(detail).strip().splitlines()[0] if str(detail).strip() else ""
+                report.append("OK  %s%s" % (label, (": " + first) if first else ""))
+            except ToolError as exc:
+                bad[0] += 1
+                report.append("ERR %s: %s" % (label, str(exc).splitlines()[0]))
+
+        for d in devices:
+            step("crear %s (%s)" % (d["name"], d["model"]),
+                 lambda d=d: self.add_device({"name": d["name"], "model": d["model"], "x": d["x"], "y": d["y"]}))
+        ports_for = {}      # dispositivo -> {vecino: puerto real}
+
+        def do_link(l):
+            out = self.connect({"device1": l["a"], "device2": l["b"], "cable": l.get("cable") or "auto",
+                                "port1": l.get("port_a") or "", "port2": l.get("port_b") or ""})
+            m = re.match(r"OK .*:(\S+) <-> .*:(\S+)\s*$", out.strip())
+            if m:
+                ports_for.setdefault(l["a"], {})[l["b"]] = m.group(1)
+                ports_for.setdefault(l["b"], {})[l["a"]] = m.group(2)
+            return out
+
+        for l in plan.get("links", []):
+            step("cable %s <-> %s" % (l["a"], l["b"]), lambda l=l: do_link(l))
+        for h in plan.get("hosts", []):
+            step("IP %s" % h["device"], lambda h=h: self.set_ip(
+                {"device": h["device"], "ip": h.get("ip"), "mask": h.get("mask", "255.255.255.0"),
+                 "gateway": h.get("gateway"), "port": h.get("port"), "dhcp": bool(h.get("dhcp"))}))
+        for srv in plan.get("servers", []):
+            if srv.get("ip"):
+                step("IP servidor %s" % srv["device"], lambda srv=srv: self.set_ip(
+                    {"device": srv["device"], "ip": srv["ip"], "mask": srv.get("mask", "255.255.255.0"),
+                     "gateway": srv.get("gateway"), "port": srv.get("port")}))
+            if isinstance(srv.get("dhcp"), dict):
+                dh = srv["dhcp"]
+                step("DHCP en %s" % srv["device"], lambda srv=srv, dh=dh: self.dhcp_server(
+                    {"device": srv["device"], "pool": dh.get("pool"), "gateway": dh.get("gateway"), "dns": dh.get("dns"),
+                     "start_ip": dh["start_ip"], "mask": dh["mask"], "max_users": dh.get("max_users"),
+                     "tftp": dh.get("tftp")}))
+            if isinstance(srv.get("dns"), dict) and srv["dns"].get("records"):
+                step("DNS en %s" % srv["device"], lambda srv=srv: self.dns_server(
+                    {"device": srv["device"], "records": srv["dns"]["records"]}))
+        def resolved(spec):
+            try:
+                return planmod.resolve_ports(spec, ports_for.get(spec["device"], {}))
+            except planmod.PlanError as exc:
+                raise ToolError(str(exc))
+
+        for r in plan.get("routers", []):
+            step("config router %s" % r["device"],
+                 lambda r=r: self.router_config({"device": r["device"], "spec": resolved(r)}))
+        for sw in plan.get("switches", []):
+            step("config switch %s" % sw["device"],
+                 lambda sw=sw: self.switch_config({"device": sw["device"], "spec": resolved(sw)}))
+        for c in plan.get("cli", []):
+            step("cli %s" % c["device"], lambda c=c: self.cli({"device": c["device"], "commands": c["commands"]}))
+        report.append("")
+        report.append("Resumen: %d pasos correctos, %d con error." % (ok[0], bad[0]))
+        if bad[0]:
+            report.append("Revisa los ERR; puedes repetir solo esos pasos con las herramientas sueltas.")
+        return "\n".join(report)

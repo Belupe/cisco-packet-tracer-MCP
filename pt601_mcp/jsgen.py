@@ -112,3 +112,108 @@ def send_only(name, command):
     return wrap(get_dev("d", name) +
                 ' var cl = d.getCommandLine(); if (!cl) { return "ERROR: sin consola"; }'
                 ' cl.enterCommand(%s); return "enviado";' % q(command))
+
+
+# ---------------------------------------------------------------------------
+# Nuevas piezas: puertos, cableado automatico, introspeccion, servicios, limpieza
+# ---------------------------------------------------------------------------
+
+def list_ports(name):
+    return wrap(
+        get_dev("d", name) +
+        ' var o = []; for (var i = 0; i < d.getPortCount(); i++) { var p = d.getPortAt(i);'
+        ' var l = null; try { l = p.getLink(); } catch (e1) {}'
+        ' var up = ""; try { up = p.isPortUp(); } catch (e2) {}'
+        ' o.push([p.getName(), l ? "conectado" : "libre", up].join("\\t")); } return o.join("\\n");')
+
+
+_CONNECT_HELPERS = (
+    ' var SKIP = ["Console","Aux","Serial","Wireless","Vlan","Loopback","USB","Modem","Async","Rs232","Coaxial","Cellular"];'
+    ' function skipPort(n) { for (var k = 0; k < SKIP.length; k++) { if (n.indexOf(SKIP[k]) == 0) { return true; } } return false; }'
+    ' function pref(n) { if (n.indexOf("FastEthernet") == 0) { return 1; } if (n.indexOf("GigabitEthernet") == 0) { return 2; }'
+    ' if (n.indexOf("Ethernet") == 0) { return 0; } return 3; }'
+    ' function freePorts(d) { var c = []; for (var i = 0; i < d.getPortCount(); i++) { var p = d.getPortAt(i); var n = String(p.getName());'
+    ' if (skipPort(n)) { continue; } var l = null; try { l = p.getLink(); } catch (e) {} if (l) { continue; }'
+    ' c.push({ n: n, s: pref(n) * 1000 + i }); }'
+    ' c.sort(function (a, b) { return a.s - b.s; }); var r = []; for (var j = 0; j < c.length; j++) { r.push(c[j].n); } return r; }'
+)
+
+
+def connect_auto(d1, d2, code, port1, port2):
+    forced1 = ("[%s]" % q(port1)) if port1 else "freePorts(a)"
+    forced2 = ("[%s]" % q(port2)) if port2 else "freePorts(b)"
+    return wrap(
+        get_dev("a", d1) + get_dev("b", d2) + _CONNECT_HELPERS +
+        ' var ca = %s; var cb = %s;'
+        ' if (ca.length == 0) { return "ERROR: " + %s + " no tiene puertos Ethernet libres"; }'
+        ' if (cb.length == 0) { return "ERROR: " + %s + " no tiene puertos Ethernet libres"; }'
+        ' for (var i = 0; i < ca.length && i < 3; i++) { for (var j = 0; j < cb.length && j < 3; j++) {'
+        ' if (lw.createLink(%s, ca[i], %s, cb[j], %d)) { return "OK " + %s + ":" + ca[i] + " <-> " + %s + ":" + cb[j]; } } }'
+        ' return "ERROR: PT rechazo el cable " + %s + " <-> " + %s + " (puertos probados: " + ca.slice(0, 3).join(",") + " / " + cb.slice(0, 3).join(",") + ")";'
+        % (forced1, forced2, q(d1), q(d2), q(d1), q(d2), int(code), q(d1), q(d2), q(d1), q(d2)))
+
+
+def describe(name, process, port):
+    pick = "var obj = d; var label = \"dispositivo\";"
+    if process:
+        pick = ('var obj = null; try { obj = d.getProcess(%s); } catch (e) { obj = null; }'
+                ' if (!obj) { return "ERROR: el dispositivo no tiene el proceso " + %s; } var label = "proceso " + %s;'
+                % (q(process), q(process), q(process)))
+    elif port:
+        pick = ('var obj = d.getPort(%s); if (!obj) { return "ERROR: no existe el puerto " + %s; } var label = "puerto " + %s;'
+                % (q(port), q(port), q(port)))
+    return wrap(
+        get_dev("d", name) + " " + pick +
+        ' var k = []; for (var m in obj) { k.push(m); } k.sort();'
+        ' return label + " (" + k.length + " miembros): " + k.join(", ");')
+
+
+_PROC_FINDER = (
+    ' var proc = null; var cands = %s;'
+    ' for (var ci = 0; ci < cands.length && !proc; ci++) { try { proc = d.getProcess(cands[ci]); } catch (e0) { proc = null; } }'
+    ' if (!proc) { return "ERROR: no encontre el servicio %s en " + %s + " (prueba pt_describe con process=...)"; }'
+    ' var members = []; for (var mk in proc) { members.push(mk); } members.sort();'
+    ' var log = [];'
+)
+
+
+def _attempt(label, expr):
+    return (' if (!done) { try { %s; done = true; log.push(%s); } catch (e) { log.push(%s + " fallo"); } }'
+            % (expr, q(label), q(label)))
+
+
+def dhcp_server(name, pool, gateway, dns, start_ip, mask, max_users, tftp):
+    args = [q(pool), q(gateway or "0.0.0.0"), q(dns or "0.0.0.0"), q(start_ip), q(mask), q(max_users), q(tftp or "0.0.0.0")]
+    a8 = ", ".join(args + [q("0.0.0.0")])
+    a7 = ", ".join(args)
+    a6 = ", ".join(args[:6])
+    body = (get_dev("d", name) + _PROC_FINDER % ('["DhcpServerMain","DHCPServerMain","DhcpServer"]', "DHCP", q(name)) +
+            ' try { if (typeof proc.setEnable == "function") { proc.setEnable(true); log.push("setEnable"); } } catch (e1) { log.push("setEnable fallo"); }'
+            ' var done = false;' +
+            _attempt("addNewPool(8)", "proc.addNewPool(%s)" % a8) +
+            _attempt("addNewPool(7)", "proc.addNewPool(%s)" % a7) +
+            _attempt("addNewPool(6)", "proc.addNewPool(%s)" % a6) +
+            ' if (!done) { return "ERROR: no pude crear el pool. Intentos: " + log.join("; ") + ". Miembros del proceso: " + members.join(", "); }'
+            ' return "OK pool " + %s + " (" + log.join("; ") + ")";' % q(pool))
+    return wrap(body)
+
+
+def dns_server(name, records):
+    pairs = "[" + ", ".join("[%s, %s]" % (q(r["name"]), q(r["ip"])) for r in records) + "]"
+    body = (get_dev("d", name) + _PROC_FINDER % ('["DnsServerMain","DNSServerMain","DnsServer"]', "DNS", q(name)) +
+            ' try { if (typeof proc.setEnable == "function") { proc.setEnable(true); log.push("setEnable"); } } catch (e1) { log.push("setEnable fallo"); }'
+            ' var recs = %s; var okn = 0; var bad = [];'
+            ' for (var i = 0; i < recs.length; i++) { var done = false;' % pairs +
+            _attempt("addIpAddress", "proc.addIpAddress(recs[i][0], recs[i][1])") +
+            _attempt("addRecord", "proc.addRecord(recs[i][0], recs[i][1])") +
+            ' if (done) { okn++; } else { bad.push(recs[i][0]); } }'
+            ' if (bad.length > 0) { return "ERROR: registros no creados: " + bad.join(", ") + ". Miembros del proceso: " + members.join(", "); }'
+            ' return "OK " + okn + " registro(s) DNS";')
+    return wrap(body)
+
+
+def clear_workspace():
+    return wrap(
+        'var names = []; for (var i = 0; i < net.getDeviceCount(); i++) { names.push(net.getDeviceAt(i).getName()); }'
+        ' var n = 0; for (var j = 0; j < names.length; j++) { var guard = 0; while (guard < 10 && lw.removeDevice(names[j])) { n++; guard++; } }'
+        ' return String(n) + " borrados, quedan " + net.getDeviceCount();')

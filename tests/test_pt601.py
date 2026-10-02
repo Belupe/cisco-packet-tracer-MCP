@@ -37,11 +37,14 @@ class FakePanel(threading.Thread):
 
     def run(self):
         while not self.stop:
-            code, text = http("%s/next?t=%s" % (self.base, self.token))
-            if code == 200:
-                cid, js = text.split("\n", 1)
-                http("%s/result?id=%s&t=%s" % (self.base, cid, self.token), "POST",
-                     self.responder(js).encode())
+            try:
+                code, text = http("%s/next?t=%s" % (self.base, self.token))
+                if code == 200:
+                    cid, js = text.split("\n", 1)
+                    http("%s/result?id=%s&t=%s" % (self.base, cid, self.token), "POST",
+                         self.responder(js).encode())
+            except (OSError, urllib.error.URLError):
+                return      # el servidor se apago al terminar la prueba
 
 
 class BridgeTests(unittest.TestCase):
