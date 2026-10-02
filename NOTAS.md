@@ -100,3 +100,12 @@ Ejecutar `sondeo/sondeo_ipc.js` en PT 6.0.1 y volcar la salida para conocer la A
 - Cadena validada: cliente PowerShell -> `servidor.ps1` (127.0.0.1:54321) -> panel web view (XHR) -> Script Engine (`evaluateJavaScript`) -> `ipc` -> resultado de vuelta.
 - Siguiente: (1) prueba de topología completa desde fuera (addDevice 2 args + setName + moveToLocation + createLink 8100 + consola con `no` al diálogo inicial),
   (2) token/autenticación en el puente, (3) servidor MCP (Python) que use este puente, (4) catálogo de modelos de la 6.0.1.
+
+## HITO: topología completa construida y con ping desde fuera (PT 6.0.1.0011)
+Probado por el usuario con `pt.ps1`: T-R1 (2911) + T-S1 (2960-24TT) + T-PC1/T-PC2, 3 cables, IPs, config de router por consola, ping PC1 -> router con respuesta (los primeros paquetes se pierden por ARP/STP: 1 de 4).
+Lecciones para el constructor final:
+- `setName` NO impide nombres duplicados por IPC (la GUI sí). Comprobar `net.getDevice(nombre)` ANTES de renombrar; `getDevice` devuelve el primero. Los duplicados se apilan en la misma posición y no se ven.
+- `lw.removeDevice(nombre)` borra uno por llamada (bucle hasta `false`).
+- `cl.enterCommand(...)` en routers es síncrono; en PCs `ping` devuelve al instante y la salida llega después: leer `cl.getOutput()` pasados unos segundos (y `isPortUp/isProtocolUp` para estado de enlaces).
+- Router nuevo: responder `no` y luego `""` al diálogo inicial; luego `enable` / `configure terminal`.
+- Cada comando de `pt.ps1` es independiente; las variables `lw`/`net` globales se definen una vez por arranque del módulo.
