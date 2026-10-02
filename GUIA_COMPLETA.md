@@ -85,7 +85,8 @@ El servidor ejecuta JavaScript dentro de Packet Tracer, así que es una superfic
 | Servidor MCP + puente con token, panel con token | ⚠️ Probado solo con panel simulado; **falta probarlo en PT real** |
 | `pt_build_topology`, `pt_connect` (puertos automáticos), `@VECINO` | ⚠️ Probado solo con puente simulado |
 | `pt_router_config` / `pt_switch_config` (genera IOS) | ✅ El IOS generado es estándar; ⚠️ falta ejecutarlo en PT |
-| `pt_dhcp_server` / `pt_dns_server` (servicios de Server-PT) | ❓ **Sin validar**: usa nombres de la API moderna |
+| `pt_dhcp_server` (Server-PT) | ✅ Probado en tu PT: proceso `DhcpServer`, pool por defecto (`setStartIp/EndIp/DefaultRouter/DnsServerIp`) |
+| `pt_dns_server` (Server-PT) | ❓ **Sin validar**: usa nombres de la API moderna (probable `DnsServer`) |
 | Modelos de dispositivo distintos de los 9 verificados | ❓ Sin verificar en la 6.0.1 |
 
 ## 6. Cómo reparar lo que falle (receta general)
@@ -93,7 +94,7 @@ El servidor ejecuta JavaScript dentro de Packet Tracer, así que es una superfic
 2. **Lee el mensaje de error.** Casi todos están en español y apuntan a la causa habitual.
 3. **Mira el panel "PT-MCP local".** Muestra `conexión: ok/ERROR`, `recibidos` y `terminados` (¿llega el código? ¿vuelve?).
 4. **Cierra la ventana Debug** del Script Module si buscas errores capturados por `try/catch`.
-5. **Inspecciona la API real** con `pt_describe`: lista los métodos de un dispositivo, proceso (`DhcpServerMain`) o puerto.
+5. **Inspecciona la API real** con `pt_describe`: lista los métodos de un dispositivo, proceso (`DhcpServer`) o puerto.
 6. **Aísla con `pt_eval`** para probar una línea de JavaScript suelta dentro de PT.
 7. **Arregla y comprueba:** `python3 -m unittest discover -s tests -v` (o con el `python.exe` portátil).
 

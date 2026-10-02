@@ -38,7 +38,7 @@ Referencia completa y esquemas: `pt601_mcp/docs/herramientas.md` y `pt601_mcp/do
 - **Ping**: los primeros paquetes se pierden por ARP/convergencia del switch; repite antes de dar un fallo por bueno. OSPF/EIGRP
   necesitan unos segundos.
 - **DHCP/DNS en Server-PT**: si `pt_dhcp_server`/`pt_dns_server` fallan, ejecuta `pt_describe` con
-  `process="DhcpServerMain"` (o `DnsServerMain`) y enseña la lista al usuario; no inventes métodos.
+  `process="DhcpServer"` (o `DnsServer`) y enseña la lista al usuario; no inventes métodos.
   Alternativa fiable para DHCP: pool en el router con `pt_router_config` (`dhcp_pools`).
 - **No uses `pt_eval`** salvo que no exista herramienta. Si lo usas: JavaScript estilo ES3 (sin `let`/`const`/flechas/`JSON`),
   siempre devuelve texto, y nunca ejecutes código que no hayas entendido.

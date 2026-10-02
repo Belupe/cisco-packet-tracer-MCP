@@ -33,8 +33,8 @@ Lee `GUIA_COMPLETA.md` (arquitectura y mapa de confianza) y `NOTAS.md` (diario t
 - Un error IPC aborta el script si la ventana Debug está abierta.
 
 ## Lo primero que probablemente haya que reparar (sin validar en PT real)
-1. **Servidores DHCP/DNS de Server-PT** (`jsgen.dhcp_server`, `jsgen.dns_server`): basados en la API moderna
-   (`getProcess("DhcpServerMain")`, `addNewPool`, `addIpAddress`). Usa `pt_describe` con `process=` para ver los métodos reales.
+1. **Servidor DNS de Server-PT** (`jsgen.dns_server`): basado en la API moderna (`DnsServerMain`, `addIpAddress`); el real
+   probablemente sea `DnsServer`. Usa `pt_describe` con `process=DnsServer`. (El DHCP ya está validado: proceso `DhcpServer`, pool por defecto.)
 2. **Puertos automáticos** (`jsgen.connect_auto`) y el parseo de `OK X:p <-> Y:q` en `tools.build_topology` (`@VECINO`).
 3. **Panel con token** (`extension/interface.html`): probado solo con un panel simulado.
 4. Modelos del catálogo marcados «sin verificar» (`catalog.py`).

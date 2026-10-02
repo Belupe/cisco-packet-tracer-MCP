@@ -116,7 +116,7 @@ Después reinicia Claude Code (o `/reload-skills`) y comprueba con `/skills`.
 | `ya existe un dispositivo llamado X` | Nombre repetido (la 6.0.1 permitiría duplicados invisibles y no cablearía) | Usa otro nombre o `pt_remove_device` |
 | `PT rechazo el cable` | Puerto ocupado o nombre de puerto incorrecto | `pt_list_ports` y usa `pt_connect` (elige puertos libres solo) |
 | Un router no responde a comandos | Sigue en el diálogo inicial | `pt_cli` responde `no` automáticamente; si no, `pt_read_output` para ver el prompt |
-| Servidor DHCP/DNS falla | La API de servicios puede variar en la 6.0.1 | `pt_describe` con `process="DhcpServerMain"` y pásame la lista de miembros |
+| Servidor DHCP/DNS falla | La API de servicios puede variar en la 6.0.1 | `pt_describe` con `process="DhcpServer"` y pásame la lista de miembros |
 | `pt_ping` pierde los primeros paquetes | Normal: ARP + convergencia del switch | Repite el ping |
 
 ## 6. Seguridad

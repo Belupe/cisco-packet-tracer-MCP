@@ -42,6 +42,19 @@ _BY_UPPER = {m.upper(): m for m in _MODELS}
 # Tipos que arrancan con IOS y necesitan skipBoot() para estar listos al instante.
 BOOTING_TYPES = (0, 1, 16)
 
+# Modelos "Empty" nacen SIN puertos: hay que apagarlos y meterles modulos. Firma comprobada en una
+# 6.0.1.0011 real: device.addModule("<ranura>", 4, "PT-SWITCH-NM-1CFE") -> true (4 = tipo de modulo,
+# que PT confirma en el evento moduleAdded). Cada modulo 1CFE aporta 1 FastEthernet<ranura>/1.
+# Con 2 argumentos (ranura, modelo) PT responde 'Invalid arguments' y, con la ventana Debug abierta, se cuelga.
+EMPTY_MODULES = {
+    "Switch-PT-Empty": {"module": "PT-SWITCH-NM-1CFE", "type": 4, "slots": 10},
+}
+
+
+def empty_module_spec(model):
+    """Datos para poblar un modelo Empty, o None si el modelo trae sus propios puertos."""
+    return EMPTY_MODULES.get(model)
+
 CABLES = {
     "straight": 8100, "cross": 8101, "crossover": 8101, "roll": 8102,
     "fiber": 8103, "phone": 8104, "cable": 8105, "serial": 8106, "auto": 8107,

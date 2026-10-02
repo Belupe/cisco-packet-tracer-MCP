@@ -1,6 +1,7 @@
 """Herramientas MCP para Packet Tracer 6.0.1 (traducen llamadas a JavaScript del puente)."""
 import time
 
+import ipaddress
 import json
 import re
 
@@ -42,7 +43,7 @@ class Tools:
              _obj({}), self.list_devices),
             ("pt_add_device",
              "Crea un dispositivo. Falla si el nombre ya existe (PT 6.0.1 permite duplicados por IPC y despues no se pueden cablear).",
-             _obj({"name": S, "model": S, "x": I, "y": I}, ["name", "model"]), self.add_device),
+             _obj({"name": S, "model": S, "x": I, "y": I, "ports": I}, ["name", "model"]), self.add_device),
             ("pt_remove_device", "Borra un dispositivo por nombre (todas las copias).",
              _obj({"name": S}, ["name"]), self.remove_device),
             ("pt_move_device", "Mueve un dispositivo a (x, y).",
@@ -164,8 +165,18 @@ class Tools:
         except catalog.CatalogError as exc:
             raise ToolError(str(exc))
         x, y = args.get("x"), args.get("y")
-        out = self._run(jsgen.add_device(name, model, dtype, x, y, dtype in catalog.BOOTING_TYPES))
+        modules = None
+        spec = catalog.empty_module_spec(model)
+        if spec:
+            ports = args.get("ports")
+            ports = spec["slots"] if ports is None else ports
+            if isinstance(ports, bool) or not isinstance(ports, int) or not 1 <= ports <= spec["slots"]:
+                raise ToolError("'ports' debe ser un entero entre 1 y %d para %s" % (spec["slots"], model))
+            modules = (spec["module"], spec["type"], ports)
+        out = self._run(jsgen.add_device(name, model, dtype, x, y, dtype in catalog.BOOTING_TYPES, modules))
         note = "" if verified else " (modelo sin verificar en 6.0.1)"
+        if modules:
+            note += " con %d puertos FastEthernet (modulos %s)" % (modules[2], modules[0])
         return out + note
 
     def remove_device(self, args):
@@ -280,8 +291,17 @@ class Tools:
             tftp = ios.check_ip(args["tftp"], "tftp") if args.get("tftp") else ""
         except ios.ConfigError as exc:
             raise ToolError(str(exc))
-        return self._run(jsgen.dhcp_server(self._req(args, "device"), args.get("pool") or "serverPool", gw, dns,
-                                           start, mask, int(args.get("max_users") or 50), tftp))
+        # La 6.0.1 no tiene "maximo de usuarios": el pool se define por IP inicial y final. pool y tftp no se pueden
+        # fijar por IPC (el pool por defecto se llama serverPool).
+        try:
+            users = int(args.get("max_users") or 50)
+            net = ipaddress.ip_network("%s/%s" % (start, mask), strict=False)
+            end = ipaddress.ip_address(int(ipaddress.ip_address(start)) + users - 1)
+        except ValueError as exc:
+            raise ToolError("max_users o rango invalido: %s" % exc)
+        if users < 1 or end not in net:
+            raise ToolError("El rango %s + %d usuarios se sale de la red %s" % (start, users, net))
+        return self._run(jsgen.dhcp_server(self._req(args, "device"), gw, dns, start, str(end), mask))
 
     def dns_server(self, args):
         records = args.get("records")
@@ -337,7 +357,8 @@ class Tools:
 
         for d in devices:
             step("crear %s (%s)" % (d["name"], d["model"]),
-                 lambda d=d: self.add_device({"name": d["name"], "model": d["model"], "x": d["x"], "y": d["y"]}))
+                 lambda d=d: self.add_device({"name": d["name"], "model": d["model"], "x": d["x"], "y": d["y"],
+                                              "ports": d.get("ports")}))
         ports_for = {}      # dispositivo -> {vecino: puerto real}
 
         def do_link(l):
@@ -369,6 +390,13 @@ class Tools:
             if isinstance(srv.get("dns"), dict) and srv["dns"].get("records"):
                 step("DNS en %s" % srv["device"], lambda srv=srv: self.dns_server(
                     {"device": srv["device"], "records": srv["dns"]["records"]}))
+        # En la 6.0.1 activar el cliente DHCP no pide la IP si el servidor aun no existia o no habia cable:
+        # una vez cableado y con el pool listo, se fuerza con ipconfig /renew (comprobado en PT real).
+        if any(isinstance(s.get("dhcp"), dict) for s in plan.get("servers", [])):
+            for h in plan.get("hosts", []):
+                if h.get("dhcp"):
+                    step("DHCP renovar %s" % h["device"],
+                         lambda h=h: self._run(jsgen.send_only(h["device"], "ipconfig /renew")) or "pedido")
         def resolved(spec):
             try:
                 return planmod.resolve_ports(spec, ports_for.get(spec["device"], {}))

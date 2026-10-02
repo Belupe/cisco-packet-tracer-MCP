@@ -129,6 +129,44 @@ class ToolTests(unittest.TestCase):
         self.assertIn("skipBoot", js)
         self.assertIn("ya existe", js)                          # guarda contra duplicados
 
+    def test_switch_pt_empty_gets_modules_with_three_arg_addmodule(self):
+        # Switch-PT-Empty nace sin puertos. En la 6.0.1 real: addModule("<ranura>", 4, modelo) -> true;
+        # con 2 argumentos da 'Invalid arguments' y cuelga el motor si Debug esta abierta.
+        fb = FakeBridge(["OK Switch0 -> SW1", "OK Switch1 -> SW2"])
+        t = Tools(fb)
+        out = t.call("pt_add_device", {"name": "SW1", "model": "Switch-PT-Empty"})
+        js = fb.sent[0]
+        self.assertIn('d.addModule(String(s), 4, "PT-SWITCH-NM-1CFE")', js)
+        self.assertIn("s < 10", js)                       # 10 ranuras por defecto
+        self.assertLess(js.index("setPower(false)"), js.index("addModule"))
+        self.assertLess(js.index("addModule"), js.index("setPower(true)"))
+        self.assertIn("10 puertos", out)
+        t.call("pt_add_device", {"name": "SW2", "model": "Switch-PT-Empty", "ports": 5})
+        self.assertIn("s < 5", fb.sent[1])
+        for bad in (0, 11, "5", True):
+            with self.assertRaises(ToolError):
+                t.call("pt_add_device", {"name": "SW3", "model": "Switch-PT-Empty", "ports": bad})
+
+    def test_connect_auto_falls_back_when_pt_rejects_8107(self):
+        # En la 6.0.1 real, 8107 (auto) lo rechaza PT en los puertos de modulo del Switch-PT-Empty; 8100 si.
+        fb = FakeBridge(["OK A:FastEthernet0/1 <-> B:FastEthernet0"])
+        Tools(fb).call("pt_connect", {"device1": "A", "device2": "B"})
+        js = fb.sent[0]
+        self.assertIn("var codes = [8107];", js)
+        self.assertIn("if (8107 == 8107)", js)
+        self.assertIn("[8107, 8100, 8101]", js)            # equipos distintos: recto antes que cruzado
+        self.assertIn("[8107, 8101, 8100]", js)            # equipos iguales: cruzado antes que recto
+        self.assertIn("codes[k]", js)
+        fb2 = FakeBridge(["OK A:x <-> B:y"])
+        Tools(fb2).call("pt_connect", {"device1": "A", "device2": "B", "cable": "straight"})
+        self.assertIn("var codes = [8100];", fb2.sent[0])   # un cable explicito no cambia de tipo
+        self.assertIn("if (8100 == 8107)", fb2.sent[0])
+
+    def test_models_with_own_ports_get_no_modules(self):
+        fb = FakeBridge(["OK S -> S1"])
+        Tools(fb).call("pt_add_device", {"name": "S1", "model": "2960-24TT"})
+        self.assertNotIn("addModule", fb.sent[0])
+
     def test_unknown_model_and_missing_name(self):
         t = Tools(FakeBridge([]))
         with self.assertRaises(ToolError):

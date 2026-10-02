@@ -30,8 +30,8 @@ class ScriptBridge:
             return "OK a:FastEthernet0/1 <-> b:FastEthernet0"
         if "setDhcpClientFlag" in code or "setIpSubnetMask" in code:
             return "192.168.1.10 / 255.255.255.0"
-        if "addNewPool" in code:
-            return "OK pool LAN (setEnable; addNewPool(8))"
+        if "getProcess(\"DhcpServer\")" in code:
+            return "OK pool serverPool: 192.168.1.100 - 192.168.1.199"
         if "addIpAddress" in code:
             return "OK 2 registro(s) DNS"
         if "enterCommand" in code:
@@ -138,8 +138,30 @@ class BuildTests(unittest.TestCase):
         self.assertLess(idx["crear SW1"], idx["cable SW1"])
         self.assertLess(idx["IP servidor SRV-DHCP"], idx["DHCP en"])
         joined = "\n".join(sb.sent)
-        self.assertIn("addNewPool", joined)
+        self.assertIn('getProcess("DhcpServer")', joined)
+        self.assertNotIn("addNewPool", joined)               # no existe en la 6.0.1
         self.assertIn("setDhcpClientFlag(true)", joined)
+        self.assertEqual(len([l for l in labels if "DHCP renovar" in l]), 5)   # 3 PCs + 2 portatiles
+        self.assertIn('enterCommand("ipconfig /renew")', joined)
+        self.assertLess(idx["DHCP en"], next(i for i, l in enumerate(labels) if "DHCP renovar" in l))
+
+    def test_dhcp_server_uses_real_601_api(self):
+        # Comprobado en una 6.0.1.0011 real: proceso "DhcpServer", pool por defecto con setStartIp/setEndIp/
+        # setDefaultRouter/setDnsServerIp. setNetworkMask("...") da 'Invalid arguments' y cuelga el motor.
+        sb = ScriptBridge()
+        Tools(sb).call("pt_dhcp_server", {"device": "S", "start_ip": "192.168.1.100", "mask": "255.255.255.0",
+                                           "gateway": "192.168.1.1", "dns": "192.168.1.3", "max_users": 100})
+        js = sb.sent[0]
+        self.assertIn('getProcess("DhcpServer")', js)
+        self.assertIn('pool.setStartIp("192.168.1.100")', js)
+        self.assertIn('pool.setEndIp("192.168.1.199")', js)       # inicio + 100 usuarios - 1
+        self.assertIn('pool.setDefaultRouter("192.168.1.1")', js)
+        self.assertIn('pool.setDnsServerIp("192.168.1.3")', js)
+        self.assertNotIn("setNetworkMask", js)
+        self.assertNotIn("addNewPool", js)
+        with self.assertRaises(ToolError):                         # se sale de la /24
+            Tools(sb).call("pt_dhcp_server", {"device": "S", "start_ip": "192.168.1.200", "mask": "255.255.255.0",
+                                               "max_users": 100})
 
     def test_dry_run_does_not_touch_pt(self):
         sb = ScriptBridge()
@@ -154,7 +176,7 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(sb.sent, [])
 
     def test_errors_do_not_stop_the_build(self):
-        sb = ScriptBridge(fail_on="addNewPool")
+        sb = ScriptBridge(fail_on="DhcpServer")
         report = Tools(sb).call("pt_build_topology", {"plan": USER_SCENARIO})
         self.assertIn("ERR DHCP en SRV-DHCP", report)
         self.assertIn("OK  DNS en SRV-DNS", report)                  # continua con el resto
@@ -197,7 +219,7 @@ class HighLevelToolTests(unittest.TestCase):
         sb = ScriptBridge()
         Tools(sb).call("pt_connect", {"device1": "R1", "device2": "SW1"})
         self.assertIn("freePorts(a)", sb.sent[0])
-        self.assertIn(", 8107)", sb.sent[0])
+        self.assertIn("var codes = [8107];", sb.sent[0])      # auto por defecto (con respaldo recto/cruzado)
         with self.assertRaises(ToolError):
             Tools(sb).call("pt_connect", {"device1": "R1", "device2": "R2", "cable": "serial"})
 

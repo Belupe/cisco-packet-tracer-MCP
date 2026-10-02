@@ -124,3 +124,34 @@ Lecciones para el constructor final:
   **SIN VALIDAR en la 6.0.1**: si fallan, `pt_describe device process=DhcpServerMain` lista los métodos reales.
 - Documentación: `pt601_mcp/README.md`, `pt601_mcp/docs/herramientas.md`, `pt601_mcp/docs/ejemplos.md`; skill en `skill/SKILL.md`.
 - 39 pruebas offline (`python3 -m unittest discover -s tests -v`).
+
+## v0.3: Switch-PT-Empty (primer hallazgo con el MCP conectado a un PT real, 2026-10-02)
+- **Primera conexión real OK**: el MCP, el panel con token y el Script Engine funcionan en una 6.0.1.0011 (`pt_status`, `pt_add_device`, `pt_list_ports`, `pt_eval`).
+- `Switch-PT-Empty` nace **sin puertos** (solo `Vlan1`). Hay que apagarlo y meterle módulos. Tiene 10 ranuras.
+- Firma correcta: `d.addModule("<ranura>", 4, "PT-SWITCH-NM-1CFE")` -> `true`. La ranura n da el puerto `FastEthernet<n>/1`.
+  El `4` (tipo de módulo) y el modelo se descubrieron con `d.registerEvent("moduleAdded", null, function(src,args){...})`
+  (args.type=4, args.model) añadiendo un módulo a mano en la pestaña Physical.
+- **Con 2 argumentos** (`addModule("0","PT-SWITCH-NM-1CFE")`) PT responde `Invalid arguments for IPC call "addModule"`.
+- **Trampa de la ventana Debug**: ese error de IPC detiene el motor del módulo y `try/catch` no lo evita; hasta hacer Stop/Start
+  todo lo demás da "PT no respondió en 25 s". Cierra la ventana Debug antes de probar cosas, y prueba UNA firma por llamada.
+- El texto de `addModule` solo aparecía como nombre dentro de `PacketTracer6.exe` (sin firma): no hay documentación local del API.
+- Arreglo: `catalog.EMPTY_MODULES` + `jsgen.add_device(..., modules)` + parámetro `ports` (1-10, por defecto 10) en `pt_add_device`
+  y en los planes. `Router-PT-Empty` sigue sin poblarse (módulos de router sin comprobar).
+- 41 pruebas offline.
+
+## v0.3 (cont.): DHCP, cables y escenario de 3 ciudades validados en PT real (2026-10-02)
+- Red construida de verdad: 4 `Switch-PT-Empty` (10 puertos), 15 equipos finales, 1 Server-PT; 19 cables; los 15 equipos reciben IP por DHCP.
+- **Cable automático (8107) rechazado** en los puertos de módulo del Switch-PT-Empty; 8100 (recto) sí. `connect_auto` ahora prueba 8107 y, si falla,
+  recto/cruzado según los equipos (mismos tipos -> cruzado primero). Probado en PT real: `pt_connect` OK en los 17 cables restantes.
+- **DHCP de Server-PT**: el proceso se llama **`DhcpServer`** (no `DhcpServerMain`/`DHCPServerMain`: `getProcess` devuelve null si el nombre no existe).
+  Miembros: addPool, getPool, getPoolAt, getPoolCount, addExcludedAddress, removePool, setEnable, isEnable...
+  Hay un pool por defecto `serverPool` (192.168.1.0/24, rango 192.168.1.0-192.168.2.255) con getters/setters:
+  `setStartIp`, `setEndIp`, `setDefaultRouter`, `setDnsServerIp` (cadenas de IP) -> **funcionan**. `setNetworkMask("255.255.255.0")` -> *Invalid arguments*
+  (cuelga con Debug abierta): no se usa. `addNewPool` no existe. `jsgen.dhcp_server` reescrito; `max_users` se traduce a IP final (inicio + n - 1).
+- **Los clientes DHCP no piden IP solos**: `p.setDhcpClientFlag(true)` antes de existir cable/servidor deja 0.0.0.0. Hay que lanzar `ipconfig /renew`
+  desde la consola del PC (`pt_cli`). `pt_build_topology` ahora añade pasos "DHCP renovar X" tras configurar el servidor.
+- `getDefaultGateway` no existe en el puerto de la 6.0.1 (TypeError normal). Los PCs/portátiles dan IP/máscara con `getIpAddress/getSubnetMask`.
+- Regla práctica: **cada IPC con argumentos erróneos cuelga el motor mientras Debug esté abierta** (aparece sola); probar una llamada cada vez y
+  tener a mano Stop/Start. Cada vez que cambie el código Python hay que recargar el servidor MCP (/mcp) y luego Stop/Start en PT (token nuevo).
+- **Pendiente**: `jsgen.dns_server` sigue con nombres de la API moderna (`DnsServerMain`/`addIpAddress`): probablemente el proceso real sea `DnsServer`;
+  comprobar con `pt_describe process=DnsServer` antes de tocarlo. 43 pruebas offline.

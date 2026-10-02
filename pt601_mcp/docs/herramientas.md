@@ -9,7 +9,7 @@ Todas devuelven texto. Un error se devuelve como `isError` con un mensaje en esp
 | `pt_catalog` | — | Modelos disponibles (con marca "verificado en 6.0.1") y tipos de cable |
 | `pt_list_devices` | — | Nombre, modelo, tipo, encendido y nº de puertos |
 | `pt_list_ports` | `device` | Puertos del dispositivo y si están libres o conectados |
-| `pt_describe` | `device`, `process?`, `port?` | Introspección: lista los métodos de un dispositivo, proceso (`DhcpServerMain`) o puerto |
+| `pt_describe` | `device`, `process?`, `port?` | Introspección: lista los métodos de un dispositivo, proceso (`DhcpServer`) o puerto |
 | `pt_read_output` | `device`, `tail_chars?` | Final de la consola |
 
 ## Construcción
