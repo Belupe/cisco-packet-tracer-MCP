@@ -223,6 +223,67 @@ def dhcp_off(name, port):
     return wrap(get_dev("d", name) + ' var p = d.getPort(%s); if (p) { p.setDhcpClientFlag(false); } return "OK";' % q(port))
 
 
+_ROUTER_READY = (
+    # Deja la consola de un router en modo privilegiado: sale de --More--, la despierta, sale de (config) y hace enable.
+    ' function ready(cl) { var out = String(cl.getOutput()); if (out.substring(Math.max(0, out.length - 12)).indexOf("More") >= 0) { cl.enterCommand("q"); }'
+    ' var pr = String(cl.getPrompt()); if (pr == "" || String(cl.getMode()) == "logout") { cl.enterCommand(""); pr = String(cl.getPrompt()); }'
+    ' if (pr.indexOf("(config") >= 0) { cl.enterCommand("end"); pr = String(cl.getPrompt()); }'
+    ' if (pr.indexOf("#") < 0) { cl.enterCommand("enable"); } }'
+)
+
+
+def routing_audit(save):
+    """Revisa las tablas de TODOS los routers: saca las redes de las interfaces de todos ellos y pregunta a cada router
+    por cada red con 'show ip route <red>' (salida corta, sin --More--). Lineas: router<TAB>conocidas<TAB>total<TAB>
+    defecto<TAB>guardado<TAB>redes que faltan."""
+    return wrap(
+        _ROUTER_READY +
+        ' function toInt(a) { var p = String(a).split("."); return ((parseInt(p[0], 10) * 256 + parseInt(p[1], 10)) * 256 + parseInt(p[2], 10)) * 256 + parseInt(p[3], 10); }'
+        ' function toIp(n) { function md(v) { return v - Math.floor(v / 256) * 256; } return [md(Math.floor(n / 16777216)), md(Math.floor(n / 65536)), md(Math.floor(n / 256)), md(n)].join("."); }'
+        ' var routers = []; var nets = []; var seen = {};'
+        ' for (var i = 0; i < net.getDeviceCount(); i++) { var d = net.getDeviceAt(i); if (d.getType() != 0) { continue; } routers.push(d);'
+        ' for (var j = 0; j < d.getPortCount(); j++) { var p = d.getPortAt(j); var ip = String(p.getIpAddress()); var mk = String(p.getSubnetMask());'
+        ' if (!ip || ip == "0.0.0.0" || !mk || mk == "0.0.0.0") { continue; }'
+        ' var a = toInt(ip); var m = toInt(mk); var size = 4294967296 - m; var nw = toIp(Math.floor(a / size) * size);'
+        ' if (!seen[nw]) { seen[nw] = 1; nets.push(nw); } } }'
+        ' var o = ["REDES\\t" + nets.join(",")];'
+        ' for (var r = 0; r < routers.length; r++) { var cl = routers[r].getCommandLine(); ready(cl); var miss = [];'
+        ' for (var k = 0; k < nets.length; k++) { var n0 = String(cl.getOutput()).length; cl.enterCommand("show ip route " + nets[k]);'
+        ' if (String(cl.getOutput()).substring(n0).indexOf("not in table") >= 0) { miss.push(nets[k]); } }'
+        ' var n1 = String(cl.getOutput()).length; cl.enterCommand("show ip route 0.0.0.0");'
+        ' var def = String(cl.getOutput()).substring(n1).indexOf("not in table") < 0; var saved = "";'
+        ' if (%s) { var n2 = String(cl.getOutput()).length; cl.enterCommand("write memory"); saved = String(cl.getOutput()).substring(n2).indexOf("[OK]") >= 0 ? "si" : "NO"; }'
+        ' o.push([routers[r].getName(), nets.length - miss.length, nets.length, def ? "si" : "no", saved, miss.join(",")].join("\\t")); }'
+        ' return o.join("\\n");' % ("true" if save else "false"))
+
+
+def host_ips(names):
+    """IP del primer puerto con direccion de cada equipo: lineas nombre<TAB>ip (ip vacia si no existe o no tiene)."""
+    arr = "[" + ", ".join(q(n) for n in names) + "]"
+    return wrap('var ns = %s; var o = []; for (var i = 0; i < ns.length; i++) { var d = null; try { d = net.getDevice(ns[i]); } catch (e) {}'
+                ' var ip = ""; if (d) { for (var j = 0; j < d.getPortCount() && !ip; j++) { var p = d.getPortAt(j);'
+                ' if (typeof p.getIpAddress == "function") { var a = String(p.getIpAddress()); if (a && a != "0.0.0.0") { ip = a; } } } }'
+                ' o.push(ns[i] + "\\t" + ip); } return o.join("\\n");' % arr)
+
+
+def ping_launch(pairs):
+    """Lanza a la vez un ping por cada (origen, ip destino); devuelve origen<TAB>longitud de consola previa."""
+    arr = "[" + ", ".join("[%s, %s]" % (q(a), q(ip)) for a, ip in pairs) + "]"
+    return wrap('var ps = %s; var o = []; for (var i = 0; i < ps.length; i++) { var cl = net.getDevice(ps[i][0]).getCommandLine();'
+                ' var n = String(cl.getOutput()).length; cl.enterCommand("ping " + ps[i][1]); o.push(ps[i][0] + "\\t" + n); }'
+                ' return o.join("\\n");' % arr)
+
+
+def ping_collect(marks):
+    """Para cada (origen, longitud previa): paquetes recibidos, o -1 si el ping aun no ha terminado."""
+    arr = "[" + ", ".join("[%s, %d]" % (q(a), int(n)) for a, n in marks) + "]"
+    return wrap('var ms = %s; var o = []; for (var i = 0; i < ms.length; i++) { var out = String(net.getDevice(ms[i][0]).getCommandLine().getOutput());'
+                ' var s = out.length >= ms[i][1] ? out.substring(ms[i][1]) : out; var r = -1;'
+                ' if (s.indexOf("could not find host") >= 0) { r = 0; }'
+                ' var m = /Received = (\\d+)/.exec(s); if (m) { r = parseInt(m[1], 10); }'
+                ' o.push(ms[i][0] + "\\t" + r); } return o.join("\\n");' % arr)
+
+
 def port_ip(name, port):
     return wrap(get_dev("d", name) + ' var p = d.getPort(%s); return p ? String(p.getIpAddress()) : "";' % q(port))
 

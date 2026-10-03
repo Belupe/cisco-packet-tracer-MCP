@@ -437,3 +437,60 @@ trabajando a la vez en la pestaña Config de un router, la consola queda en `(co
   `getRSSwitch()` tiene también `showSimulationMode` (sin probar).
 - Añadir un módulo a un router lo reinicia: tarda ~1–2 min en rehacer OSPF y RIP (actualizaciones cada 30 s). No dar nada por roto antes.
 - 36 herramientas, 73 pruebas.
+
+## 2026-10-03 (madrugada): reto 6 — tres protocolos, Internet con NAT, camino de reserva y prueba todos contra todos (no son reglas)
+**Topología final de `4.pkt`: 63 equipos, 14 routers, 15 redes internas + Internet.**
+- **OSPF** (área 0): red antigua (40, 41, 42, 43) y sedes (`192.168.50.x/26`, núcleo `10.0.0.0/24`). **RIP v2**: Norte/Sur (60, 61; tránsito `10.0.1.0`).
+  **EIGRP 100**: Este/Oeste (70, 71; tránsito `10.0.2.0`). Dos routers frontera: `R-Firewall` (OSPF↔RIP) y `R-Backup` (OSPF↔EIGRP).
+- **Redistribución, todo aceptado por la 6.0.1:** `router ospf 1` → `redistribute rip subnets`, `redistribute eigrp 100 subnets`,
+  `redistribute static subnets`; `router rip` → `redistribute ospf 1 metric 2`; `router eigrp 100` → `redistribute ospf 1 metric 10000 100 255 1 1500`.
+  Las rutas llegan como `O E2`, `D EX` y `R`.
+- **Salida a Internet:** `R-Firewall Fa3/0 200.1.1.1/30` ↔ `R-ISP 200.1.1.2` ↔ servidor `Internet 8.8.8.8`. En `R-Firewall`: `ip route 0.0.0.0 0.0.0.0 200.1.1.2`,
+  `default-information originate` en OSPF y en RIP (la ruta por defecto llega a **todos** los routers, incluidos los EIGRP: *Gateway of last resort*),
+  y **NAT con sobrecarga** (`ip nat inside` / `outside`, `access-list 1`, `ip nat inside source list 1 interface FastEthernet3/0 overload`):
+  el proveedor no tiene ninguna ruta a las redes privadas y aun así ping y web a `8.8.8.8` funcionan desde los cinco tipos de red
+  (`show ip nat statistics`: 9 traducciones dinámicas). `default-information originate metric N` **no** existe en la 6.0.1.
+- **Camino de reserva y conmutación ante fallo:** `R-Backup` une también las dos mitades con `ip ospf cost 100` en sus dos interfaces OSPF, así que el
+  camino normal es `R-Firewall`. Apagando `Fa1/0` de `R-Firewall`, la traza de `PC0` a `192.168.50.3` pasa de `192.168.42.4` a `192.168.42.5` sin perder
+  el ping. **Hallazgo:** durante el fallo las sedes pierden las rutas externas que origina `R-Firewall` (redes RIP y ruta por defecto) aunque siga
+  alcanzable por el otro lado: el OSPF de PT no las recalcula. Arreglo: en `R-Backup`, rutas estáticas de reserva **resumidas**
+  (`ip route 192.168.60.0 255.255.254.0 192.168.42.4`, `ip route 10.0.1.0 …`, `ip route 0.0.0.0 0.0.0.0 192.168.42.4`) con `redistribute static subnets`
+  y `default-information originate`. En estado normal ganan las `/24` más específicas de `R-Firewall`; en fallo quedan el resumen `/23` y la ruta por defecto.
+- **`setInterval` funciona dentro del motor de scripts desde `pt_eval`** (asignando a una variable global sin `var`): se puede dejar un planificador
+  corriendo dentro de PT (aquí, las rondas de ping) y consultar su estado después. Útil para trabajos largos sin una llamada por paso.
+- **Revisión de tablas sin `--More--`:** `show ip route <red>` devuelve «% Network not in table» o la entrada; preguntando red a red se audita cada
+  router. Herramienta `pt_routing_audit` (saca las redes de las interfaces de todos los routers y opcionalmente hace `write memory` en todos).
+  Resultado aquí: los 13 routers internos conocen las 15 redes y tienen ruta por defecto; `R-ISP` ninguna (a propósito, por el NAT).
+- En la pestaña Config → Static de un router que aprende por OSPF/RIP/EIGRP no aparece nada: la tabla se ve con `show ip route`.
+- **Fallo encontrado por la prueba todos contra todos:** todas las parejas que fallaban tenían a `PC1`; había perdido su puerta de enlace (cliente DHCP,
+  `<GATEWAY>` vacío; causa sin determinar, posiblemente una renovación mientras PT estaba en Simulación). Se le repuso con `device.setDefaultGateway`.
+- El usuario pidió comunicación total de ida y vuelta: se quitó la ACL 110 de `R-Firewall` (bloqueaba a propósito el ping de la red 41 a los
+  servidores). Auditoría de los 29 equipos finales (IP, puerta de enlace dentro de su red, puerto activo): sin problemas tras reponer la de `PC1`.
+- Herramientas nuevas: `pt_ping_matrix`, `pt_traceroute`, `pt_routing_audit`. 39 herramientas, 76 pruebas.
+- **Rutas estáticas visibles en todos los routers (pedido por el usuario, que quiere verlas en la pestaña Config → Static):** 13 rutas por router,
+  una por red no conectada, como **flotantes** (`ip route <red> <máscara> <salto> 200`): quedan en la configuración y en la pestaña Static, pero
+  OSPF/RIP/EIGRP (distancias 110/120/90) siguen mandando y la conmutación ante fallo no se rompe. Los saltos se calcularon del diseño, no de la consola.
+- **Lección:** no sacar saltos de `show ip route <red>` con una expresión regular. Tres trampas vistas: una ruta estática se imprime `* 192.168.42.1`
+  sin coma; preguntar por `192.168.50.0` (subred cero) lista toda la red mayor con sus subredes; y la primera orden a una consola recién despertada
+  puede perderse y desplazar todas las respuestas. Mi primer intento puso saltos equivocados en dos routers (incluida una ruta a una red conectada);
+  se deshizo borrando todas las `… 200` leídas de `serializeToXml()` y volviendo a ponerlas desde una tabla explícita.
+  `pt_routing_audit` solo usa «% Network not in table», que sí es fiable, salvo para la subred cero de una red troceada.
+
+## 2026-10-03 (madrugada): reto 7 — VPN IPsec entre dos sedes con VLAN (no son reglas)
+- **El `Router-PT-Empty` NO admite VPN:** su IOS (PT1000, 12.2(28)) rechaza `interface Tunnel0` y `crypto isakmp policy`. Sí admite
+  subinterfaces `encapsulation dot1Q` (router-on-a-stick). **El 2811 sí admite las dos cosas** (y `interface Tunnel0`); nace con
+  `FastEthernet0/0` y `0/1`. Para una VPN hay que salirse de la norma «todo PT-Empty» en los dos routers de los extremos: avisar al usuario.
+- **VLAN en `Switch-PT-Empty`: funcionan** (`vlan N`, `switchport mode access` + `switchport access vlan N`, `switchport mode trunk`).
+  `pt_switch_config` validado en PT real dentro de un plan.
+- **Montaje:** dos 2811 (`R-VPN-A`, `R-VPN-B`) unidos al proveedor `R-ISP` por enlaces `/30` (`200.1.2.0`, `200.1.3.0`; router↔router directo con
+  cable cruzado); cada uno con un `Switch-PT-Empty` en troncal y dos VLAN por subinterfaz (A: 10 y 20 → `172.16.10.0/24`, `172.16.20.0/24`;
+  B: 30 y 40). Ruta por defecto hacia el proveedor, que **no** conoce las redes `172.16.x`.
+- **IPsec sitio a sitio aceptado tal cual:** `crypto isakmp policy 10` (`encryption aes`, `authentication pre-share`, `group 2`),
+  `crypto isakmp key <clave> address <peer>`, `crypto ipsec transform-set TS esp-aes esp-sha-hmac`, ACL extendida con el tráfico interesante
+  (una línea por pareja red local–red remota), `crypto map VPN 10 ipsec-isakmp` (`set peer`, `set transform-set`, `match address`) y
+  `crypto map VPN` en la interfaz WAN. Al aplicarlo: `%CRYPTO-6-ISAKMP_ON_OFF: ISAKMP is ON`.
+- **Verificación:** el túnel se levanta con el primer tráfico (los primeros ping se pierden). `show crypto isakmp sa` → `QM_IDLE … ACTIVE` en los dos
+  extremos; `show crypto ipsec sa` → contadores `#pkts encaps/decaps` subiendo. Ping entre VLAN de sedes distintas con **TTL 126** (el salto del
+  proveedor queda dentro del túnel) y entre VLAN de la misma sede con TTL 127. Desde el servidor del proveedor, `172.16.10.10` es inalcanzable:
+  esas redes solo existen a través de la VPN. Sin NAT en los 2811, las VLAN no salen a `8.8.8.8` (esperado).
+- Herramienta nueva `pt_vpn_ipsec` (un extremo cada vez) e `ios.ipsec_vpn`. 2811 marcado como verificado en el catálogo. 40 herramientas, 78 pruebas.

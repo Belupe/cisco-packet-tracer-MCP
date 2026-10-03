@@ -19,6 +19,9 @@ Todas devuelven texto. Un error se devuelve como `isError` con un mensaje en esp
 | `pt_remove_module` | `device`, `slot` | Quita el módulo de una ranura (puerto sobrante de un `Switch-PT-Empty`) |
 | `pt_rename_device` | `name`, `new_name` | Cambia el nombre; falla si el nuevo ya existe |
 | `pt_running_config` | `device` | Running-config completa de un router o switch (interfaces, rutas…), sin el `--More--` de la consola |
+| `pt_routing_audit` | `save?` | Revisa las tablas de todos los routers (redes conocidas, ruta por defecto, las que faltan) y opcionalmente guarda su configuración |
+| `pt_ping_matrix` | `devices[]`, `wait_seconds?` | Ping todos contra todos entre los equipos indicados (uno por red), en rondas simultáneas |
+| `pt_traceroute` | `device`, `target` | Traza la ruta desde un equipo hasta una IP |
 | `pt_realtime` | — | Pone PT en Tiempo real (en Simulación no avanza nada); `pt_status` avisa del modo |
 | `pt_snapshot` | — | Lee la red entera del archivo abierto: posición (x, y), IP/máscara/DHCP, cables con puertos y tipo, servicios y pool DHCP de los servidores |
 | `pt_describe` | `device`, `process?`, `port?` | Introspección: lista los métodos de un dispositivo, proceso (`DhcpServer`) o puerto |
@@ -47,6 +50,7 @@ Para `serial`/`console` hay que indicar los puertos.
 | `pt_router_config` | `device`, `spec`, `save?` | Ver esquema abajo |
 | `pt_switch_config` | `device`, `spec`, `save?` | Ver esquema abajo |
 | `pt_dhcp_server` | `device`, `start_ip`, `mask`, `pool?`, `gateway?`, `dns?`, `max_users?`, `tftp?` | Servicio DHCP de un Server-PT |
+| `pt_vpn_ipsec` | `device`, `spec`, `save?` | Un extremo de una VPN IPsec sitio a sitio (router 2811): `spec={wan_port, peer, key, local[], remote[]}` |
 | `pt_dns_server` | `device`, `records[{name, ip}]` | Servicio DNS de un Server-PT |
 | `pt_server_services` | `device`, `services[]` | Deja encendidos SOLO esos servicios (`dhcp`, `dns`, `http`, `https`, `tftp`, `ftp`, `smtp`, `pop3`, `ntp`, `syslog`, `email`) y apaga el resto. En planes: `"services": ["dhcp"]` dentro de `servers[]` |
 

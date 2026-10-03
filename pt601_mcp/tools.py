@@ -96,6 +96,17 @@ class Tools:
             ("pt_ping",
              "Ejecuta ping desde un dispositivo y espera el resultado (los primeros paquetes pueden perderse por ARP/STP).",
              _obj({"device": S, "target": S, "wait_seconds": I}, ["device", "target"]), self.ping),
+            ("pt_routing_audit",
+             "Revisa las tablas de enrutamiento de TODOS los routers: averigua todas las redes del mapa y dice, router por router, "
+             "cuantas conoce, si tiene ruta por defecto y cuales le faltan. save=true guarda ademas la configuracion de todos (write memory).",
+             _obj({"save": B}, []), self.routing_audit),
+            ("pt_ping_matrix",
+             "Prueba de conectividad TODOS CONTRA TODOS: da un equipo (PC/portatil/servidor) por red y hace ping entre cada pareja, "
+             "varias a la vez. Devuelve cuantas parejas responden y cuales fallan. Un ping prueba la ida y la vuelta.",
+             _obj({"devices": {"type": "array", "items": S}, "wait_seconds": I}, ["devices"]), self.ping_matrix),
+            ("pt_traceroute",
+             "Traza la ruta (tracert) desde un PC/portatil/servidor hasta una IP: ensena por que routers pasa.",
+             _obj({"device": S, "target": S, "wait_seconds": I}, ["device", "target"]), self.traceroute),
             ("pt_list_ports", "Lista los puertos de un dispositivo y si estan libres o conectados.",
              _obj({"device": S}, ["device"]), self.list_ports),
             ("pt_connect",
@@ -111,6 +122,11 @@ class Tools:
              "Configura un router desde una descripcion: hostname, interfaces(port,ip,mask,vlan para subinterfaces), "
              "static_routes, default_route, ospf, eigrp, rip, dhcp_pools, extra. Ver docs/herramientas.md.",
              _obj({"device": S, "spec": {"type": "object"}, "save": B}, ["device", "spec"]), self.router_config),
+            ("pt_vpn_ipsec",
+             "Configura un extremo de una VPN IPsec sitio a sitio en un router 2811 (el Router-PT-Empty no admite VPN). "
+             "spec={wan_port, peer, key, local:[{network, mask}], remote:[{network, mask}]}. Hay que configurar los DOS extremos, "
+             "cada uno con el otro como peer y las redes invertidas. Comprueba con 'show crypto isakmp sa' tras un ping entre sedes.",
+             _obj({"device": S, "spec": {"type": "object"}, "save": B}, ["device", "spec"]), self.vpn_ipsec),
             ("pt_switch_config",
              "Configura un switch desde una descripcion: hostname, vlans, access_ports, trunk_ports, svi, extra.",
              _obj({"device": S, "spec": {"type": "object"}}, ["device", "spec"]), self.switch_config),
@@ -360,6 +376,92 @@ class Tools:
                 return _clip(out)
         return _clip(out) + "\n[aviso: el ping no termino en %d s; vuelve a leer con pt_read_output]" % wait
 
+    @staticmethod
+    def _rounds(names):
+        """Emparejamientos de liga (todos contra todos): en cada ronda cada equipo aparece una sola vez."""
+        team = list(names) + ([None] if len(names) % 2 else [])
+        n, out = len(team), []
+        for _ in range(n - 1):
+            pairs = [(team[i], team[n - 1 - i]) for i in range(n // 2)]
+            out.append([(a, b) for a, b in pairs if a is not None and b is not None])
+            team = [team[0]] + [team[-1]] + team[1:-1]
+        return out
+
+    def _ping_round(self, pairs, ips, wait):
+        marks = [line.split("\t") for line in self._run(jsgen.ping_launch([(a, ips[b]) for a, b in pairs])).split("\n")]
+        marks = [(m[0], int(m[1])) for m in marks]
+        deadline, got = time.time() + wait, {}
+        while True:
+            time.sleep(1.0)
+            for line in self._run(jsgen.ping_collect(marks)).split("\n"):
+                name, _, val = line.partition("\t")
+                got[name] = int(val)
+            if all(v >= 0 for v in got.values()) or time.time() >= deadline:
+                return got
+
+    def routing_audit(self, args):
+        out = self._run(jsgen.routing_audit(bool(args.get("save"))), timeout=90)
+        rows = [line.split("\t") for line in out.split("\n") if line.strip()]
+        nets = rows[0][1].split(",") if rows and rows[0][0] == "REDES" and len(rows[0]) > 1 and rows[0][1] else []
+        if not nets or len(rows) < 2:
+            return "(no hay routers con interfaces configuradas)"
+        lines = ["Redes del mapa (%d): %s" % (len(nets), ", ".join(nets))]
+        incomplete = 0
+        for r in rows[1:]:
+            name, known, total, default, saved, miss = (r + [""] * 6)[:6]
+            reach = known == total or default == "si"
+            if not reach:
+                incomplete += 1
+            txt = "  %s: conoce %s de %s redes, ruta por defecto: %s" % (name, known, total, default)
+            if saved:
+                txt += ", guardado: %s" % saved
+            if miss:
+                txt += " | no tiene ruta especifica a: %s%s" % (miss, " (las alcanza por la ruta por defecto)" if default == "si" else " -> INALCANZABLES")
+            lines.append(txt)
+        lines.append("Resultado: %s." % ("todos los routers alcanzan todas las redes" if not incomplete
+                                         else "%d router(es) con redes inalcanzables" % incomplete))
+        return "\n".join(lines)
+
+    def ping_matrix(self, args):
+        names = args.get("devices")
+        if not isinstance(names, list) or len(names) < 2 or len(set(names)) != len(names):
+            raise ToolError("devices debe ser una lista de al menos 2 equipos distintos (uno por red)")
+        wait = max(10, min(int(args.get("wait_seconds") or 40), 120))
+        ips = dict(line.split("\t") for line in self._run(jsgen.host_ips(names)).split("\n"))
+        missing = [n for n in names if not ips.get(n)]
+        if missing:
+            raise ToolError("Sin IP o inexistentes: %s" % ", ".join(missing))
+        ok, failed = [], []
+        for pairs in self._rounds(names):
+            got = self._ping_round(pairs, ips, wait)
+            retry = [(a, b) for a, b in pairs if got.get(a, -1) <= 0]
+            if retry:                                     # el primer intento se pierde a veces entero por ARP en cadena
+                got.update(self._ping_round(retry, ips, wait))
+            for a, b in pairs:
+                (ok if got.get(a, -1) > 0 else failed).append((a, b, got.get(a, -1)))
+        total = len(ok) + len(failed)
+        lines = ["Conectividad todos contra todos: %d de %d parejas responden (%d equipos)." % (len(ok), total, len(names))]
+        lines.append("Equipos: " + ", ".join("%s=%s" % (n, ips[n]) for n in names))
+        if failed:
+            lines.append("FALLAN:")
+            lines += ["  %s (%s) <-> %s (%s)%s" % (a, ips[a], b, ips[b], " [sin terminar]" if r < 0 else "") for a, b, r in failed]
+        else:
+            lines.append("Ninguna pareja falla.")
+        return "\n".join(lines)
+
+    def traceroute(self, args):
+        dev, target = self._req(args, "device"), self._req(args, "target")
+        wait = max(5, min(int(args.get("wait_seconds") or 60), 120))
+        start = int(self._run(jsgen.output_length(dev)))
+        self._run(jsgen.send_only(dev, "tracert %s" % target))
+        deadline, out = time.time() + wait, ""
+        while time.time() < deadline:
+            time.sleep(1.0)
+            out = self._run(jsgen.read_output(dev, start, 0))
+            if "Trace complete" in out:
+                return _clip(out)
+        return _clip(out) + "\n[aviso: la traza no termino en %d s]" % wait
+
     def eval(self, args):
         return _clip(self._run(self._req(args, "code")))
 
@@ -399,6 +501,14 @@ class Tools:
         except (ios.ConfigError, KeyError, ValueError) as exc:
             raise ToolError("spec invalida: %s" % exc)
         return self._send_config(self._req(args, "device"), cmds, bool(args.get("save")))
+
+    def vpn_ipsec(self, args):
+        try:
+            cmds = ios.ipsec_vpn(args.get("spec") or {})
+        except (ios.ConfigError, KeyError, ValueError) as exc:
+            raise ToolError("spec invalida: %s" % exc)
+        dev = self._req(args, "device")
+        return self._send_config(dev, ["enable", "configure terminal"] + cmds + ["end"], bool(args.get("save")))
 
     def switch_config(self, args):
         try:

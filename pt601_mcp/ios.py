@@ -51,6 +51,38 @@ def _ospf_networks(entries):
     return out
 
 
+def wildcard(mask):
+    return ".".join(str(255 - int(p)) for p in check_mask(mask).split("."))
+
+
+def ipsec_vpn(spec):
+    """VPN IPsec sitio a sitio (comprobada en un 2811 de PT 6.0.1; el Router-PT-Empty NO tiene crypto ni Tunnel).
+    spec = {"wan_port": "FastEthernet0/0", "peer": "200.1.3.2", "key": "clase123",
+            "local": [{"network": "172.16.10.0", "mask": "255.255.255.0"}], "remote": [...],
+            "acl": 110, "map": "VPN", "transform": "TS"}"""
+    peer = check_ip(spec["peer"], "peer")
+    key = str(spec.get("key") or "").strip()
+    if not key or " " in key:
+        raise ConfigError("La VPN necesita una clave compartida ('key') sin espacios")
+    local, remote = spec.get("local") or [], spec.get("remote") or []
+    if not local or not remote:
+        raise ConfigError("La VPN necesita las redes 'local' y 'remote'")
+    acl, name, ts = int(spec.get("acl") or 110), str(spec.get("map") or "VPN"), str(spec.get("transform") or "TS")
+    if not 100 <= acl <= 199:
+        raise ConfigError("La ACL de la VPN debe ser extendida (100-199)")
+    lines = ["crypto isakmp policy 10", "encryption aes", "authentication pre-share", "group 2", "exit",
+             "crypto isakmp key %s address %s" % (key, peer),
+             "crypto ipsec transform-set %s esp-aes esp-sha-hmac" % ts]
+    for a in local:
+        for b in remote:
+            lines.append("access-list %d permit ip %s %s %s %s" % (
+                acl, check_ip(a["network"], "red local"), wildcard(a["mask"]),
+                check_ip(b["network"], "red remota"), wildcard(b["mask"])))
+    lines += ["crypto map %s 10 ipsec-isakmp" % name, "set peer %s" % peer, "set transform-set %s" % ts,
+              "match address %d" % acl, "exit", "interface %s" % spec["wan_port"], "crypto map %s" % name, "exit"]
+    return lines
+
+
 def router_config(spec):
     lines = []
     if spec.get("hostname"):

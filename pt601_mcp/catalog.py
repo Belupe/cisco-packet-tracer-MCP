@@ -18,7 +18,7 @@ DEVICE_TYPES = {
 _MODELS = {
     # routers
     "2911": ("router", True), "1841": ("router", False), "1941": ("router", False),
-    "2620XM": ("router", False), "2621XM": ("router", False), "2811": ("router", False),
+    "2620XM": ("router", False), "2621XM": ("router", False), "2811": ("router", True),
     "2901": ("router", False), "Router-PT": ("router", False),
     "Router-PT-Empty": ("router", True),
     # switches

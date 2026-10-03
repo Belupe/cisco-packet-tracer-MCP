@@ -285,6 +285,70 @@ class ToolTests(unittest.TestCase):
         finally:
             tools_mod.time.sleep = real_sleep
 
+    def test_routing_audit_reports_missing_networks_and_saves(self):
+        raw = "\n".join(["REDES\t192.168.40.0,192.168.50.64,10.0.0.0",
+                          "Router0\t3\t3\tsi\tsi\t",
+                          "R-Este\t2\t3\tsi\tsi\t192.168.50.64",
+                          "R-ISP\t0\t3\tno\tsi\t192.168.40.0,192.168.50.64,10.0.0.0"])
+        fb = FakeBridge([raw])
+        out = Tools(fb).call("pt_routing_audit", {"save": True})
+        self.assertIn("Router0: conoce 3 de 3 redes", out)
+        self.assertIn("las alcanza por la ruta por defecto", out)
+        self.assertIn("INALCANZABLES", out)
+        self.assertIn("1 router(es) con redes inalcanzables", out)
+        js = fb.sent[0]
+        self.assertIn('cl.enterCommand("show ip route " + nets[k])', js)   # una red cada vez: sin --More--
+        self.assertIn('cl.enterCommand("write memory")', js)
+        self.assertIn("if (true)", js)
+        self.assertIn("if (false)", Tools(FakeBridge([raw])).bridge.sent and "" or jsgen.routing_audit(False))
+        for bad in ("let ", "const ", "=>"):
+            self.assertNotIn(bad, js)
+
+    def test_ping_matrix_round_robin_and_report(self):
+        import pt601_mcp.tools as tools_mod
+        rounds = Tools._rounds(["A", "B", "C", "D", "E"])
+        seen = set()
+        for r in rounds:
+            names = [x for pair in r for x in pair]
+            self.assertEqual(len(names), len(set(names)))          # nadie hace dos ping a la vez
+            seen.update(frozenset(p) for p in r)
+        self.assertEqual(len(seen), 10)                            # 5 equipos = 10 parejas, todas
+
+        class Net(FakeBridge):
+            ips = {"A": "10.0.0.1", "B": "10.0.0.2", "C": "10.0.0.3"}
+
+            def run_js(self, code, timeout=25.0):
+                self.sent.append(code)
+                if "var ns = " in code:
+                    return "\n".join("%s\t%s" % kv for kv in self.ips.items())
+                if 'enterCommand("ping "' in code:
+                    self.last = re.findall(r'\["(\w+)", "([\d.]+)"\]', code)
+                    return "\n".join("%s\t100" % a for a, _ip in self.last)
+                # C no llega a 10.0.0.1 ni A a 10.0.0.3; el resto responde
+                return "\n".join("%s\t%d" % (a, 0 if {a, ip} == {"C", "10.0.0.1"} or {a, ip} == {"A", "10.0.0.3"} else 4)
+                                  for a, ip in self.last)
+        real_sleep, tools_mod.time.sleep = tools_mod.time.sleep, lambda s: None
+        try:
+            out = Tools(Net([])).call("pt_ping_matrix", {"devices": ["A", "B", "C"]})
+        finally:
+            tools_mod.time.sleep = real_sleep
+        self.assertIn("2 de 3 parejas", out)
+        self.assertIn("FALLAN", out)
+        self.assertTrue("A (10.0.0.1) <-> C (10.0.0.3)" in out or "C (10.0.0.3) <-> A (10.0.0.1)" in out)
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge([])).call("pt_ping_matrix", {"devices": ["A"]})
+
+    def test_traceroute_waits_for_trace_complete(self):
+        import pt601_mcp.tools as tools_mod
+        fb = FakeBridge(["50", "enviado", "tracert 8.8.8.8\n 1 ...", "tracert 8.8.8.8\n 1 1 ms 192.168.40.1\nTrace complete."])
+        real_sleep, tools_mod.time.sleep = tools_mod.time.sleep, lambda s: None
+        try:
+            out = Tools(fb).call("pt_traceroute", {"device": "PC0", "target": "8.8.8.8"})
+        finally:
+            tools_mod.time.sleep = real_sleep
+        self.assertIn("Trace complete", out)
+        self.assertIn('cl.enterCommand("tracert 8.8.8.8")', fb.sent[1])
+
     def test_status_warns_in_simulation_mode_and_realtime_tool(self):
         # Caso real: en modo Simulacion los ping se quedaban colgados y las rutas no llegaban.
         out = Tools(FakeBridge(["6.0.1.0011|49|false"])).call("pt_status", {})

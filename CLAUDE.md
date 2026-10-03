@@ -8,7 +8,7 @@ Lee `GUIA_COMPLETA.md` (arquitectura y mapa de confianza) y `NOTAS.md` (diario t
 cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valores por defecto. Donde ponga `PENDIENTE`, pregunta; no inventes.
 
 ## Estructura
-- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (36 herramientas),
+- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (40 herramientas),
   `jsgen.py` (JavaScript para PT), `ios.py` (comandos IOS), `plan.py` (planes JSON), `catalog.py` (modelos/cables),
   `extension/` (panel + script engine que se pegan/cargan en PT).
 - `tests/` — pruebas sin PT: `python3 -m unittest discover -s tests -v` (o con el python portátil del usuario).
@@ -79,7 +79,8 @@ Petición: *mejorar el aprendizaje de representar instrucciones e identificar la
 - **Hecho:** `pt_class_plan` genera ese esquema completo desde el enunciado (posiciones, nombres desde la `.10`, puertos, cables, IPs, notas).
   Úsalo para las prácticas de servidores + sedes. Con routers o VLAN no hay reglas todavía (el único ejemplo visto,
   `ESQUEMA1.pkt`, es del curso pasado y el usuario pidió no usarlo como regla; solo sirvió para mejorar las herramientas).
-- **Modelos:** siempre `Switch-PT-Empty` y `Router-PT-Empty` (obligatorio en clase).
+- **Modelos:** siempre `Switch-PT-Empty` y `Router-PT-Empty` (obligatorio en clase). Excepción técnica: el `Router-PT-Empty` no admite VPN (ni túneles ni `crypto`);
+  para una VPN IPsec hacen falta routers 2811 en los extremos (`pt_vpn_ipsec`). Avisa al usuario antes de usarlos.
 - Observación del código: `plan.auto_layout` es genérico (por niveles) y coloca **todos** los switches en el mismo nivel (`TIER_BY_KIND`: switch = 1),
   sin jerarquía núcleo/acceso ni sedes. Habrá que hacerlo configurable o sustituirlo por posiciones que sigan el esquema de clase
   (por ejemplo, posiciones explícitas por rol y sede). Hasta entonces, pasa `x`/`y` explícitos en el plan según `reglas.md`.

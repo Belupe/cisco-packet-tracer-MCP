@@ -114,6 +114,34 @@ class ClassPlanTests(unittest.TestCase):
             Tools(ScriptBridge()).call("pt_class_plan", {"spec": {"servers": []}})
 
 
+class VpnTests(unittest.TestCase):
+    SPEC = {"wan_port": "FastEthernet0/0", "peer": "200.1.3.2", "key": "clase123",
+            "local": [{"network": "172.16.10.0", "mask": "255.255.255.0"}, {"network": "172.16.20.0", "mask": "255.255.255.0"}],
+            "remote": [{"network": "172.16.30.0", "mask": "255.255.255.0"}, {"network": "172.16.40.0", "mask": "255.255.255.0"}]}
+
+    def test_ipsec_commands_as_accepted_by_the_2811(self):
+        text = "\n".join(ios.ipsec_vpn(self.SPEC))
+        for line in ("crypto isakmp policy 10", "encryption aes", "authentication pre-share", "group 2",
+                     "crypto isakmp key clase123 address 200.1.3.2", "crypto ipsec transform-set TS esp-aes esp-sha-hmac",
+                     "access-list 110 permit ip 172.16.20.0 0.0.0.255 172.16.40.0 0.0.0.255",
+                     "crypto map VPN 10 ipsec-isakmp", "set peer 200.1.3.2", "match address 110"):
+            self.assertIn(line, text)
+        self.assertEqual(text.count("access-list 110 permit ip"), 4)          # todas las combinaciones local x remota
+        self.assertLess(text.index("match address 110"), text.index("interface FastEthernet0/0"))
+        self.assertTrue(text.rstrip().endswith("crypto map VPN\nexit"))
+        for bad in (dict(self.SPEC, key=""), dict(self.SPEC, remote=[]), dict(self.SPEC, acl=10), dict(self.SPEC, peer="x")):
+            with self.assertRaises((ios.ConfigError, ValueError)):
+                ios.ipsec_vpn(bad)
+
+    def test_tool_sends_config_and_saves(self):
+        bridge = ScriptBridge()
+        Tools(bridge).call("pt_vpn_ipsec", {"device": "R-VPN-A", "spec": self.SPEC, "save": True})
+        self.assertIn("crypto map VPN 10 ipsec-isakmp", bridge.sent[0])
+        self.assertIn("write memory", bridge.sent[0])
+        with self.assertRaises(ToolError):
+            Tools(ScriptBridge()).call("pt_vpn_ipsec", {"device": "R", "spec": {"peer": "200.1.3.2"}})
+
+
 class AclTests(unittest.TestCase):
     def test_acl_lines_and_validation(self):
         cmds = ios.router_config({"acls": [{"number": 110,
