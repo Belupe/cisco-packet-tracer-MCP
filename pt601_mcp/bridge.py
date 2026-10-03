@@ -177,6 +177,11 @@ class BaseHandler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         query = parse_qs(url.query)
         if url.path != "/result":
+            # Se lee (y se tira) el cuerpo antes de contestar: si no, Windows corta la conexion a veces y el
+            # cliente ve un error de red en lugar del 404.
+            pending = int(self.headers.get("Content-Length", "0") or 0)
+            if 0 < pending <= MAX_BODY:
+                self.rfile.read(pending)
             return self._send(404, "no encontrado")
         if not self._auth(query):
             return

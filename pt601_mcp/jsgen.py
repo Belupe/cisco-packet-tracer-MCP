@@ -27,7 +27,9 @@ def get_dev(var, name):
 def _move(x, y):
     """Coloca `d` de modo que getXCoordinate/getYCoordinate devuelvan (x, y). En la 6.0.1 real moveToLocation
     recibe la esquina del icono y los getters devuelven su centro (servidor +16,+26; switch +25,+12): se mide el
-    desfase tras un primer movimiento y se corrige. Asi las coordenadas de pt_snapshot sirven tal cual para colocar."""
+    desfase tras un primer movimiento y se corrige. Asi las coordenadas de pt_snapshot sirven tal cual para colocar.
+    OJO: solo vale para un equipo ya asentado. Uno recien creado se recoloca solo (x menos medio icono) cuando
+    termina el script que lo creo, asi que add_device lo deja aproximado y tools lo ajusta en una segunda llamada."""
     return ("d.moveToLocation(%d, %d); d.moveToLocation(%d - (d.getXCoordinate() - %d), %d - (d.getYCoordinate() - %d));"
             % (int(x), int(y), int(x), int(x), int(y), int(y)))
 
@@ -46,7 +48,7 @@ def list_devices():
 
 def add_device(name, model, dtype, x, y, skip_boot, modules=None):
     """`modules` = (modelo_modulo, tipo_modulo, n_ranuras) para los modelos Empty (sin puertos)."""
-    move = _move(x, y) if x is not None and y is not None else ""
+    move = ("d.moveToLocation(%d, %d);" % (int(x), int(y))) if x is not None and y is not None else ""
     boot = "try { d.skipBoot(); } catch (e2) {}" if skip_boot else ""
     mods = ""
     if modules:
@@ -80,10 +82,26 @@ def move_device(name, x, y):
                 ' return "OK " + d.getXCoordinate() + "," + d.getYCoordinate();')
 
 
+# 6.0.1 real: cada equipo tiene una posicion FISICA (<COORD_SETTINGS>). Los que ya venian en un .pkt estan lejos
+# (p. ej. 1918,1918) y los creados por IPC nacen en 0,0. Un cable de cobre entre equipos tan separados se crea pero
+# queda SIN SENAL (los dos puertos caidos); la fibra si funciona. moveToLocInPhysicalWS devuelve false: no se puede
+# acercar el equipo por IPC, asi que se avisa.
+_FAR = (
+    ' function physXY(d) { var x = String(d.serializeToXml()); var mx = /<X_COORD>([^<]*)</.exec(x); var my = /<Y_COORD>([^<]*)</.exec(x);'
+    ' return [mx ? parseFloat(mx[1]) : 0, my ? parseFloat(my[1]) : 0]; }'
+    ' function farWarn(a, b, code) { if (code == 8103) { return ""; } var p = physXY(a); var r = physXY(b);'
+    ' var dist = Math.sqrt((p[0] - r[0]) * (p[0] - r[0]) + (p[1] - r[1]) * (p[1] - r[1]));'
+    ' if (dist <= 100) { return ""; }'
+    ' return "\\nAVISO: los dos equipos estan a " + Math.round(dist) + " m en el espacio fisico de PT (uno venia en el archivo y el otro es nuevo):'
+    ' un cable de cobre queda SIN SENAL. Usa fibra (modulos PT-...-NM-1FFE + cable fiber) o crea toda la red en un archivo nuevo."; }'
+)
+
+
 def add_link(d1, p1, d2, p2, code):
     return wrap(
-        get_dev("a", d1) + get_dev("b", d2) +
-        ' return String(lw.createLink(%s, %s, %s, %s, %d));' % (q(d1), q(p1), q(d2), q(p2), int(code)))
+        get_dev("a", d1) + get_dev("b", d2) + _FAR +
+        ' var ok = lw.createLink(%s, %s, %s, %s, %d);'
+        ' return String(ok) + (ok ? farWarn(a, b, %d) : "");' % (q(d1), q(p1), q(d2), q(p2), int(code), int(code)))
 
 
 def remove_link(name, port):
@@ -99,8 +117,22 @@ def remove_module(name, slot):
     return wrap(
         get_dev("d", name) +
         ' var n0 = d.getPortCount(); d.setPower(false); var r = d.removeModule(%s); d.setPower(true);'
+        # Sin skipBoot el equipo arranca en tiempo real (minutos) y mientras tanto sus puertos no dan servicio.
+        ' try { d.skipBoot(); } catch (e9) {}'
         ' if (!r) { return "ERROR: PT no quito el modulo de la ranura " + %s + " de " + %s; }'
         ' return "OK puertos: " + n0 + " -> " + d.getPortCount();' % (q(int(slot)), q(int(slot)), q(name)))
+
+
+def add_module(name, slot, mtype, model):
+    """Anade un modulo a un equipo que ya existe (firma real: addModule("<ranura>", tipo, modelo), apagado)."""
+    return wrap(
+        get_dev("d", name) +
+        ' var before = {}; for (var i = 0; i < d.getPortCount(); i++) { before[d.getPortAt(i).getName()] = 1; }'
+        ' d.setPower(false); var r = d.addModule(%s, %d, %s); d.setPower(true); try { d.skipBoot(); } catch (e9) {}'
+        ' if (!r) { return "ERROR: PT no acepto el modulo " + %s + " en la ranura " + %s + " de " + %s + " (ranura ocupada o modelo de otro tipo de equipo)"; }'
+        ' var neu = []; for (var j = 0; j < d.getPortCount(); j++) { var n = d.getPortAt(j).getName(); if (!before[n]) { neu.push(n); } }'
+        ' return "OK puerto nuevo: " + neu.join(", ");'
+        % (q(int(slot)), int(mtype), q(model), q(model), q(int(slot)), q(name)))
 
 
 def set_ip(name, port, ip, mask, gateway, dhcp, dns=None):
@@ -140,9 +172,26 @@ def cli(name, commands, answer_dialog):
         get_dev("d", name) +
         ' var cl = d.getCommandLine(); if (!cl) { return "ERROR: sin consola"; }'
         ' var before = String(cl.getOutput()).length; var pr = String(cl.getPrompt());'
+        # 6.0.1 real: una consola sin usar esta en modo "logout" con prompt vacio ("Press RETURN to get started")
+        # y se traga el primer comando. Se la despierta con un Enter.
+        ' if (pr == "" || String(cl.getMode()) == "logout") { cl.enterCommand(""); pr = String(cl.getPrompt()); }'
         ' %s var cmds = [%s]; for (var i = 0; i < cmds.length; i++) { cl.enterCommand(cmds[i]); }'
         ' var o = String(cl.getOutput()); var neu = o.length >= before ? o.substring(before) : o;'
         ' return "PROMPT=" + cl.getPrompt() + "\\n" + neu;' % (dialog, cmds))
+
+
+def running_config(name):
+    """Configuracion en ejecucion de un router/switch sacada de serializeToXml (<RUNNINGCONFIG>): entera y sin
+    el --More-- de la consola (la 6.0.1 no admite 'terminal length 0')."""
+    return wrap(
+        get_dev("d", name) +
+        ' var x = String(d.serializeToXml()); var a = x.indexOf("<RUNNINGCONFIG>"); var b = x.indexOf("</RUNNINGCONFIG>");'
+        ' if (a < 0 || b < 0) { return "ERROR: " + %s + " no tiene configuracion IOS (no es router ni switch)"; }'
+        ' var ls = x.substring(a + 15, b).replace(/<\\/?LINE>/g, "").split("\\n"); var o = [];'
+        ' for (var i = 0; i < ls.length; i++) { var s = ls[i].replace(/^\\s+|\\s+$/g, "");'
+        ' s = s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");'
+        ' if (s && s != "!") { o.push((/^(ip address|duplex|speed|switchport|login|no shutdown|shutdown|encapsulation|description) ?/.test(s) ? " " : "") + s); } }'
+        ' return o.join("\\n");' % q(name))
 
 
 def output_length(name):
@@ -196,7 +245,7 @@ def connect_auto(d1, d2, code, port1, port2):
     forced1 = ("[%s]" % q(port1)) if port1 else "freePorts(a)"
     forced2 = ("[%s]" % q(port2)) if port2 else "freePorts(b)"
     return wrap(
-        get_dev("a", d1) + get_dev("b", d2) + _CONNECT_HELPERS +
+        get_dev("a", d1) + get_dev("b", d2) + _CONNECT_HELPERS + _FAR +
         ' var ca = %s; var cb = %s;'
         ' if (ca.length == 0) { return "ERROR: " + %s + " no tiene puertos Ethernet libres"; }'
         ' if (cb.length == 0) { return "ERROR: " + %s + " no tiene puertos Ethernet libres"; }'
@@ -205,7 +254,7 @@ def connect_auto(d1, d2, code, port1, port2):
         ' var codes = [%d]; if (%d == 8107) { codes = (a.getType() == b.getType()) ? [8107, 8101, 8100] : [8107, 8100, 8101]; }'
         ' for (var i = 0; i < ca.length && i < 3; i++) { for (var j = 0; j < cb.length && j < 3; j++) {'
         ' for (var k = 0; k < codes.length; k++) {'
-        ' if (lw.createLink(%s, ca[i], %s, cb[j], codes[k])) { return "OK " + %s + ":" + ca[i] + " <-> " + %s + ":" + cb[j]; } } } }'
+        ' if (lw.createLink(%s, ca[i], %s, cb[j], codes[k])) { return "OK " + %s + ":" + ca[i] + " <-> " + %s + ":" + cb[j] + farWarn(a, b, codes[k]); } } } }'
         ' return "ERROR: PT rechazo el cable " + %s + " <-> " + %s + " (puertos probados: " + ca.slice(0, 3).join(",") + " / " + cb.slice(0, 3).join(",") + ")";'
         % (forced1, forced2, q(d1), q(d2), int(code), int(code), q(d1), q(d2), q(d1), q(d2), q(d1), q(d2)))
 
@@ -273,7 +322,10 @@ def dns_server(name, records):
             _attempt("addRecord", "proc.addRecord(recs[i][0], recs[i][1])") +
             ' if (done) { okn++; } else { bad.push(recs[i][0]); } }'
             ' if (bad.length > 0) { return "ERROR: registros no creados: " + bad.join(", ") + ". Miembros del proceso: " + members.join(", "); }'
-            ' return "OK " + okn + " registro(s) DNS";')
+            # 6.0.1 real (2026-10-03): addIpAddress(nombre, ip) devuelve true y getEntryCount sube, pero un PC NO resuelve
+            # ese nombre (nslookup: Non-existent domain). Hasta saber como se crean los registros de verdad, se avisa.
+            ' return "OK " + okn + " registro(s) DNS anotados. AVISO: en la 6.0.1 los registros creados por el MCP no se resuelven'
+            ' desde los PCs (limitacion sin resolver); crealos a mano en Services > DNS del servidor.";')
     return wrap(body)
 
 
@@ -319,15 +371,38 @@ def snapshot():
         ' for (var j = 0; j < d.getPortCount(); j++) { var p = d.getPortAt(j); var lk = g(p, "getLink"); var ip = g(p, "getIpAddress");'
         ' if (!lk && (!ip || ip == "0.0.0.0")) { continue; }'
         ' var row = ["P", p.getName(), ip, g(p, "getSubnetMask"), g(p, "isDhcpClientOn")];'
+        # Un puerto inalambrico devuelve un objeto "Antenna" (sin getPort1): no es un cable.
+        ' if (lk && typeof lk.getPort1 != "function") { row.push("wifi", "", ""); lk = null; }'
         ' if (lk) { var a = lk.getPort1(); var b = lk.getPort2(); var me = a.getOwnerDevice().getName() == d.getName() && a.getName() == p.getName();'
         ' var ot = me ? b : a; row.push(lk.getConnectionType(), ot.getOwnerDevice().getName(), ot.getName()); }'
         ' o.push(row.join("\\t")); }'
+        # Gateway (el del dispositivo, el que se ve en IP Configuration) y DNS de la configuracion IP.
+        ' var dc = (typeof d.getProcess == "function") ? d.getProcess("DnsClient") : null;'
+        ' if (dc) { var gm = /<GATEWAY>([^<]*)</.exec(String(d.serializeToXml()));'
+        ' o.push(["G", gm ? gm[1] : "", dc.getServerIp()].join("\\t")); }'
         ' if (d.getType() == 9 && typeof d.getProcess == "function") { var st = [];'
         ' for (var k = 0; k < sv.length; k++) { var pr = d.getProcess(sv[k][1]); if (pr) { st.push(sv[k][0] + "=" + pr[sv[k][2]]()); } }'
         ' o.push("S\\t" + st.join(" ")); var dh = d.getProcess("DhcpServer");'
         ' for (var n = 0; dh && n < dh.getPoolCount(); n++) { var pl = dh.getPoolAt(n);'
         ' o.push(["L", pl.getDhcpPoolName(), pl.getStartIp(), pl.getEndIp(), pl.getSubnetMask(), pl.getDefaultRouter(), pl.getDnsServerIp()].join("\\t")); } } }'
         ' return o.join("\\n");' % services)
+
+
+def add_note(x, y, text, size):
+    """Nota de texto en el mapa. Firma real de la 6.0.1: addNote(x, y, tamano_letra, texto) -> id del elemento."""
+    return wrap('var id = lw.addNote(%d, %d, %d, %s); if (!id) { return "ERROR: PT no creo la nota"; }'
+                ' return "OK " + id + " en " + lw.getCanvasItemX(id) + "," + lw.getCanvasItemY(id);'
+                % (int(x), int(y), int(size), q(text)))
+
+
+def list_notes():
+    return wrap('var ids = String(lw.getCanvasItemIds()); if (!ids) { return ""; } var a = ids.split(","); var o = [];'
+                ' for (var i = 0; i < a.length; i++) { o.push(a[i] + "\\t" + lw.getCanvasItemX(a[i]) + "\\t" + lw.getCanvasItemY(a[i])); }'
+                ' return o.join("\\n");')
+
+
+def remove_note(note_id):
+    return wrap('return String(lw.removeCanvasItem(%s));' % q(note_id))
 
 
 def clear_workspace():

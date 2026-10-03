@@ -39,6 +39,81 @@ class ScriptBridge:
         return "OK"
 
 
+class ClassPlanTests(unittest.TestCase):
+    """Convenciones de clase (reglas.md) comprobadas contra el trabajo real del usuario: Practica 1A corregida."""
+
+    SPEC = {"server_switch": "SW- ServerMadrid",
+            "servers": [{"name": "HTTP", "ip": "172.26.1.3"}, {"name": "DNS", "ip": "172.26.1.2"}],
+            "sites": [{"name": "SW-Goya", "pcs": 3, "laptops": 2}, {"name": "SW-SOL", "pcs": 3, "laptops": 2},
+                      {"name": "SW-GranVia", "pcs": 2, "laptops": 4}, {"name": "SW-Moncloa", "pcs": 3, "laptops": 3}]}
+
+    def setUp(self):
+        self.plan = planmod.class_plan(self.SPEC)
+        self.dev = {d["name"]: d for d in self.plan["devices"]}
+        self.link = {(l["a"], l["port_a"]): l for l in self.plan["links"]}
+
+    def test_names_are_last_octet_from_10_bottom_site_first(self):
+        hosts = {h["device"]: h for h in self.plan["hosts"]}
+        self.assertEqual(sorted(int(n) for n in hosts), list(range(10, 32)))
+        self.assertEqual(hosts["10"], {"device": "10", "ip": "172.26.1.10", "mask": "255.255.0.0",
+                                       "gateway": "172.26.1.1", "dns": "172.26.1.2"})
+        # Moncloa (abajo): portatiles 10-12 y PCs 13-15; Goya (arriba): portatiles 27-28 y PCs 29-31
+        self.assertEqual(self.link[("SW-Moncloa", "FastEthernet6/1")]["b"], "10")
+        self.assertEqual(self.link[("SW-Moncloa", "FastEthernet1/1")]["b"], "15")
+        self.assertEqual([self.link[("SW-Goya", "FastEthernet%d/1" % i)]["b"] for i in range(1, 6)],
+                         ["31", "30", "29", "28", "27"])
+        self.assertEqual(self.dev["31"]["model"], "PC-PT")
+        self.assertEqual(self.dev["27"]["model"], "Laptop-PT")
+        self.assertLess(self.dev["31"]["x"], self.dev["29"]["x"])       # el mas bajo a la derecha
+        self.assertLess(self.dev["31"]["y"], self.dev["SW-Goya"]["y"])  # PCs arriba
+        self.assertGreater(self.dev["27"]["y"], self.dev["SW-Goya"]["y"])  # portatiles abajo
+
+    def test_switches_have_exact_ports_and_server_switch_order(self):
+        self.assertNotIn("SW- ServerMadrid", self.dev)                  # sin el espacio del enunciado
+        self.assertEqual(self.dev["SW-ServerMadrid"]["ports"], 6)
+        self.assertEqual(self.dev["SW-Goya"]["ports"], 6)
+        self.assertEqual(self.dev["SW-GranVia"]["ports"], 7)
+        order = [self.link[("SW-ServerMadrid", "FastEthernet%d/1" % i)] for i in range(6)]
+        self.assertEqual([l["b"] for l in order], ["HTTP", "DNS", "SW-Goya", "SW-SOL", "SW-GranVia", "SW-Moncloa"])
+        self.assertEqual([l["cable"] for l in order], ["straight"] * 2 + ["cross"] * 4)
+        self.assertEqual(order[2]["port_b"], "FastEthernet0/1")         # subida de la sede
+
+    def test_servers_keep_factory_services_unless_asked_and_layout_goes_left_to_right(self):
+        srv = {s["device"]: s for s in self.plan["servers"]}
+        self.assertEqual(srv["HTTP"], {"device": "HTTP", "ip": "172.26.1.3", "mask": "255.255.0.0",
+                                       "gateway": "172.26.1.1", "dns_server": "172.26.1.2"})
+        self.assertLess(self.dev["HTTP"]["y"], self.dev["DNS"]["y"])    # orden del enunciado, de arriba abajo
+        self.assertLess(self.dev["HTTP"]["x"], self.dev["SW-ServerMadrid"]["x"])
+        self.assertLess(self.dev["SW-ServerMadrid"]["x"], self.dev["SW-Goya"]["x"])
+        self.assertEqual(self.dev["SW-Goya"]["x"], self.dev["SW-Moncloa"]["x"])
+        self.assertEqual([n["text"] for n in self.plan["notes"]], ["172.26.1.3", "172.26.1.2"])
+        self.assertEqual(planmod.validate_plan(self.plan), [])
+
+    def test_dhcp_practice_like_practica_2(self):
+        plan = planmod.class_plan({
+            "server_switch": "SW-ServidorDHCP", "hosts_dhcp": True,
+            "servers": [{"name": "Server DHCP", "ip": "192.168.1.3", "services": ["dhcp"],
+                         "dhcp": {"start_ip": "192.168.1.10", "mask": "255.255.255.0", "gateway": "192.168.1.1"}}],
+            "sites": [{"name": "SW-Madrid", "pcs": 3, "laptops": 4}, {"name": "SW-Cadiz", "pcs": 3, "laptops": 1}]})
+        self.assertEqual([h["device"] for h in plan["hosts"]], [str(n) for n in range(10, 21)])  # renovar en orden
+        self.assertTrue(all(h == {"device": h["device"], "dhcp": True} for h in plan["hosts"]))
+        self.assertEqual(plan["servers"][0]["services"], ["dhcp"])
+        self.assertEqual(plan["servers"][0]["mask"], "255.255.255.0")
+        self.assertNotIn("dns_server", plan["servers"][0])
+        self.assertEqual(planmod.validate_plan(plan), [])
+
+    def test_tool_previews_and_builds(self):
+        out = Tools(ScriptBridge()).call("pt_class_plan", {"spec": self.SPEC})
+        self.assertIn("equipos 10-31", out)
+        self.assertIn("SW-ServerMadrid:FastEthernet2/1 --cross--> SW-Goya:FastEthernet0/1", out)
+        bridge = ScriptBridge()
+        report = Tools(bridge).call("pt_class_plan", {"spec": self.SPEC, "build": True})
+        self.assertIn("0 con error", report)
+        self.assertTrue(any('lw.addNote(' in c and '"172.26.1.3"' in c for c in bridge.sent))
+        with self.assertRaises(ToolError):
+            Tools(ScriptBridge()).call("pt_class_plan", {"spec": {"servers": []}})
+
+
 USER_SCENARIO = {
     "devices": [
         {"name": "SW1", "model": "2960-24TT"},

@@ -100,6 +100,10 @@ P1C: Centro 10–14, Vallecas 15–20, Arguelles 21–24, Usera 25–28 (en cada
 - Convención de nombres de VLAN: **PENDIENTE**
 
 ## 4. Puertos y cableado
+**Obligatorio (dicho por el profesor, 2026-10-03): usar siempre los modelos `PT-Empty`.** Switches = `Switch-PT-Empty`; routers =
+`Router-PT-Empty`. Nunca 2960, 2911 ni otros modelos con puertos de fábrica, salvo que el enunciado lo pida de forma expresa.
+`Router-PT-Empty`: módulos `PT-ROUTER-NM-1CFE` (un `FastEthernet<n>/0` por ranura), también los justos.
+
 Los switches son `Switch-PT-Empty` con módulos `PT-SWITCH-NM-1CFE` (un puerto `FastEthernet<n>/1` por ranura). (Práctica 2.)
 
 - **Cómo se monta un `Switch-PT-Empty`:** se le añaden módulos `PT-SWITCH-NM-1CFE` (FastEthernet de cobre) en ranuras consecutivas
@@ -155,7 +159,8 @@ Los switches son `Switch-PT-Empty` con módulos `PT-SWITCH-NM-1CFE` (un puerto `
 
 ## 7. Posición en el mapa (layout): esquema exacto de clase
 > El mapa **debe seguir el esquema de organización que se usa en clase**, tal cual. El asistente no puede improvisar otra disposición:
-> pasa siempre `x`/`y` explícitos en el plan calculados con este esquema (el `auto_layout` del MCP todavía no lo sigue).
+> usa **`pt_class_plan`**, que genera el plan entero con este esquema (posiciones, nombres, puertos, cables, IPs, notas) a partir del
+> enunciado; si la práctica no encaja en él (routers, VLAN), pasa `x`/`y` explícitos y pregunta lo que falte.
 
 El esquema es **el mismo en las dos prácticas** (2 de 2); solo cambia el tamaño. Dibujo de la Práctica 2 (coordenadas reales del `.pkt`):
 
@@ -195,11 +200,12 @@ El esquema es **el mismo en las dos prácticas** (2 de 2); solo cambia el tamañ
 - **Medidas para construir** (referencia sacada de las prácticas 1B, 1C y 2): servidores `x≈30` cada ~130 px; switch de servidores ~150 px a su derecha y centrado
   en vertical; switches de sede ~300 px más a la derecha, cada ~260 px; filas de equipos a ±80 px del switch; primer equipo ~130 px a la derecha
   del switch y ~130 px entre equipos.
-- Con routers o VLAN: **PENDIENTE** (se completará con las siguientes prácticas).
+- Con routers o VLAN: **PENDIENTE** (se completará con las prácticas de este curso).
 
 ## 8. Notas y documentación en el mapa
-- **Nota de texto con la IP del servidor encima de él** (`192.168.1.3` sobre `Server DHCP`). El MCP aún no sabe crear notas
-  (`lw.addNote`, firma sin comprobar en la 6.0.1): pendiente de implementar.
+- **Nota de texto con la IP de cada servidor justo encima de él** (`192.168.1.3` sobre `Server DHCP`). Herramienta: `pt_add_note`
+  (tamaño de letra 10). Posición: pegada a la parte de arriba del icono (el usuario recolocó a mano las de la red de prueba del
+  2026-10-03 y de ahí sale la medida); `pt_class_plan` las pone solas.
 - Lo que pide el enunciado como «identificación de los equipos» (nombre, IP, máscara, gateway): formato de entrega **PENDIENTE**.
 
 ## 9. Valores por defecto actuales del MCP (referencia, **no vinculantes**)

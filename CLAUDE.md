@@ -8,7 +8,7 @@ Lee `GUIA_COMPLETA.md` (arquitectura y mapa de confianza) y `NOTAS.md` (diario t
 cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valores por defecto. Donde ponga `PENDIENTE`, pregunta; no inventes.
 
 ## Estructura
-- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (28 herramientas),
+- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (33 herramientas),
   `jsgen.py` (JavaScript para PT), `ios.py` (comandos IOS), `plan.py` (planes JSON), `catalog.py` (modelos/cables),
   `extension/` (panel + script engine que se pegan/cargan en PT).
 - `tests/` — pruebas sin PT: `python3 -m unittest discover -s tests -v` (o con el python portátil del usuario).
@@ -33,6 +33,8 @@ cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valo
    **Forma de trabajo acordada:** al principio el usuario hace la práctica él mismo en PT, con el Word del enunciado delante, y el asistente
    va mirando (`pt_snapshot` al empezar y cada vez que avise o termine un paso) para anotar los **patrones que se repiten**, no para copiar
    el ejercicio. Con el tiempo irá delegando prácticas enteras.
+   **Ojo:** solo son fuente de reglas las prácticas de este curso. Si el usuario abre un archivo «para mejorarte» (de otro año, de prueba…),
+   úsalo para probar y mejorar las herramientas y anota lo técnico en `NOTAS.md`, pero **no** lo conviertas en reglas.
 9. `ejemplos/` contiene enunciados y trabajos de clase: está en `.gitignore`, **no se sube** y se borra al terminar.
 10. Si `pt_status` dice «PT no conectado» pero el usuario ve el panel conectado, busca otra instancia de `run.py` (otra sesión de Claude)
     con `Get-CimInstance Win32_Process -Filter "Name='python.exe'"` y ciérrala.
@@ -44,11 +46,15 @@ cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valo
 - Router nuevo: responder `no` y `""` al diálogo `[yes/no]`. `enterCommand` en router es síncrono; el `ping` de un PC no.
 - `WV.evaluateJavaScript(...)` devuelve el valor; `$se`/`webView` no existen en páginas `http://`.
 - Un error IPC aborta el script si la ventana Debug está abierta.
+- **Distancia física:** un cable de cobre entre un equipo que ya venía en el `.pkt` y uno creado por el MCP queda sin señal (están a ~2700 m
+  en el espacio físico y no se pueden mover por IPC). Usa fibra para esos enlaces o construye la red entera desde cero. `pt_connect` avisa.
+- Tras `setPower(false/true)` llama a `skipBoot()`; tras configurar un router, guarda (`save: true`): un reinicio pierde lo no guardado.
+- En un `.pkt` hecho a mano, lee los enlaces reales antes de recablear: no supongas el orden de puertos de `reglas.md`.
 
 ## Lo primero que probablemente haya que reparar (sin validar en PT real)
-1. **Servidor DNS de Server-PT** (`jsgen.dns_server`): el proceso real es `DnsServer` y tiene `addIpAddress`/`removeIpAddress`/`setEnable`
-   (comprobado 2026-10-03), pero **los argumentos de `addIpAddress` siguen sin probar**: pruébalo con una sola llamada y Debug cerrada.
-   (El DHCP ya está validado: proceso `DhcpServer`, pool por defecto.)
+1. **Registros DNS de Server-PT**: `DnsServer.addIpAddress(nombre, ip)` devuelve true pero los PCs **no resuelven** el nombre (ver `NOTAS.md`).
+   Pide al usuario que cree un registro A a mano y lee `serializeToXml()` del servidor para ver cómo se guarda de verdad.
+   (Encender/apagar servicios y el DHCP sí están validados.)
 2. **Puertos automáticos** (`jsgen.connect_auto`) y el parseo de `OK X:p <-> Y:q` en `tools.build_topology` (`@VECINO`).
 3. **Panel con token** (`extension/interface.html`): probado solo con un panel simulado.
 4. Modelos del catálogo marcados «sin verificar» (`catalog.py`).
@@ -67,8 +73,10 @@ Petición: *mejorar el aprendizaje de representar instrucciones e identificar la
 
 **B. Posición de los switches y del resto de equipos: seguir el esquema exacto de organización que se usa en clase.**
 - El esquema está en la sección 7 de `reglas.md` (rellenado con la Práctica 2; faltan routers/VLAN). **No inventes una disposición propia**: si falta, pregunta.
-- Siguiente mejora de código: que `plan.auto_layout` genere ese esquema (servidor → su switch → switches de sede → filas de PCs/portátiles),
-  que el plan numere los equipos desde la `.10` y que ponga la nota con la IP del servidor (`lw.addNote`, firma sin comprobar).
+- **Hecho:** `pt_class_plan` genera ese esquema completo desde el enunciado (posiciones, nombres desde la `.10`, puertos, cables, IPs, notas).
+  Úsalo para las prácticas de servidores + sedes. Con routers o VLAN no hay reglas todavía (el único ejemplo visto,
+  `ESQUEMA1.pkt`, es del curso pasado y el usuario pidió no usarlo como regla; solo sirvió para mejorar las herramientas).
+- **Modelos:** siempre `Switch-PT-Empty` y `Router-PT-Empty` (obligatorio en clase).
 - Observación del código: `plan.auto_layout` es genérico (por niveles) y coloca **todos** los switches en el mismo nivel (`TIER_BY_KIND`: switch = 1),
   sin jerarquía núcleo/acceso ni sedes. Habrá que hacerlo configurable o sustituirlo por posiciones que sigan el esquema de clase
   (por ejemplo, posiciones explícitas por rol y sede). Hasta entonces, pasa `x`/`y` explícitos en el plan según `reglas.md`.

@@ -30,7 +30,8 @@ Referencia completa y esquemas: `pt601_mcp/docs/herramientas.md` y `pt601_mcp/do
 Antes de crear nada lee **`reglas.md`** (raíz del repositorio): define cómo se nombran los equipos y cómo se reparten IPs, VLANs, puertos y posiciones.
 Manda sobre cualquier valor por defecto. Donde ponga `PENDIENTE`, pregunta una cosa corta al usuario; no inventes. Para redes grandes enseña
 primero el plan (`pt_build_topology` con `dry_run: true`).
-En un Server-PT apaga los servicios que no se usan con `pt_server_services`. Cuando el usuario enseñe un trabajo suyo, léelo con
+Para una práctica de servidores + sedes usa `pt_class_plan` (primero sin `build` para enseñar el plan). Usa siempre modelos `PT-Empty`.
+En un Server-PT toca los servicios (`pt_server_services`) solo si el enunciado pide configurar ese servicio. Cuando el usuario enseñe un trabajo suyo, léelo con
 `pt_snapshot` y anota en `reglas.md` las costumbres que deduzcas, sin pedir confirmación: solo dile qué has anotado.
 
 ## Reglas

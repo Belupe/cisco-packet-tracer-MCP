@@ -46,8 +46,21 @@ BOOTING_TYPES = (0, 1, 16)
 # 6.0.1.0011 real: device.addModule("<ranura>", 4, "PT-SWITCH-NM-1CFE") -> true (4 = tipo de modulo,
 # que PT confirma en el evento moduleAdded). Cada modulo 1CFE aporta 1 FastEthernet<ranura>/1.
 # Con 2 argumentos (ranura, modelo) PT responde 'Invalid arguments' y, con la ventana Debug abierta, se cuelga.
+# Router-PT-Empty (comprobado igual): tipo de modulo 3, 10 ranuras, puertos "<Tipo><ranura>/0". Modelos que acepta:
+# PT-ROUTER-NM-1CFE (FastEthernet cobre), -1CGE (GigabitEthernet), -1S (Serial), -1FFE / -1FGE (fibra),
+# -1CE (Ethernet), -1SS (Serial), -1AM (Modem). Por defecto se le ponen 2 FastEthernet; pide los que hagan falta con `ports`.
 EMPTY_MODULES = {
-    "Switch-PT-Empty": {"module": "PT-SWITCH-NM-1CFE", "type": 4, "slots": 10},
+    "Switch-PT-Empty": {"module": "PT-SWITCH-NM-1CFE", "type": 4, "slots": 10, "default": 10},
+    "Router-PT-Empty": {"module": "PT-ROUTER-NM-1CFE", "type": 3, "slots": 10, "default": 2},
+}
+
+
+# Modulos sueltos comprobados en la 6.0.1 real: modelo de equipo -> (tipo de modulo, {alias: modelo de modulo}).
+MODULES = {
+    "Switch-PT-Empty": (4, {"fastethernet": "PT-SWITCH-NM-1CFE", "fiber": "PT-SWITCH-NM-1FFE"}),
+    "Router-PT-Empty": (3, {"fastethernet": "PT-ROUTER-NM-1CFE", "fiber": "PT-ROUTER-NM-1FFE",
+                            "gigabit": "PT-ROUTER-NM-1CGE", "gigabit-fiber": "PT-ROUTER-NM-1FGE",
+                            "serial": "PT-ROUTER-NM-1S", "ethernet": "PT-ROUTER-NM-1CE", "modem": "PT-ROUTER-NM-1AM"}),
 }
 
 

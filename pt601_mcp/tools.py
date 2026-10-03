@@ -57,8 +57,20 @@ class Tools:
              "Ej.: port1='GigabitEthernet0/0', port2='FastEthernet0/1'.",
              _obj({"device1": S, "port1": S, "device2": S, "port2": S, "cable": S},
                   ["device1", "port1", "device2", "port2"]), self.add_link),
+            ("pt_add_note",
+             "Pone una nota de texto en el mapa (p. ej. la IP de un servidor encima de el). size = tamano de letra (10 por defecto).",
+             _obj({"text": S, "x": I, "y": I, "size": I}, ["text", "x", "y"]), self.add_note),
+            ("pt_list_notes", "Lista las notas y dibujos del mapa (id, x, y). El texto no se puede leer por IPC.",
+             _obj({}), self.list_notes),
+            ("pt_remove_note", "Borra una nota del mapa por su id (el que da pt_add_note / pt_list_notes).",
+             _obj({"id": S}, ["id"]), self.remove_note),
             ("pt_remove_link", "Quita el cable conectado a un puerto de un dispositivo.",
              _obj({"device": S, "port": S}, ["device", "port"]), self.remove_link),
+            ("pt_add_module",
+             "Anade un modulo (un puerto) a un Switch-PT-Empty o Router-PT-Empty que ya existe. kind: fastethernet (por defecto), "
+             "fiber y, en routers, gigabit, gigabit-fiber, serial, ethernet, modem. Apaga y enciende el equipo: guarda antes su "
+             "configuracion (write memory) si es un router ya configurado.",
+             _obj({"device": S, "slot": I, "kind": S}, ["device", "slot"]), self.add_module),
             ("pt_remove_module",
              "Quita el modulo de una ranura (p. ej. un puerto que sobra en un Switch-PT-Empty: ranura n = FastEthernet<n>/1). "
              "Apaga y enciende el equipo; el puerto debe estar sin cable.",
@@ -72,6 +84,10 @@ class Tools:
              "responde solo 'no' al dialogo inicial. Ej.: ['enable','configure terminal','hostname R1'].",
              _obj({"device": S, "commands": {"type": "array", "items": S}, "answer_initial_dialog": B},
                   ["device", "commands"]), self.cli),
+            ("pt_running_config",
+             "Devuelve la configuracion en ejecucion (running-config) completa de un router o switch, sin paginar: "
+             "interfaces con IP, rutas estaticas, VLAN... Mejor que 'show running-config' por consola.",
+             _obj({"device": S}, ["device"]), self.running_config),
             ("pt_read_output", "Lee el final de la consola de un dispositivo.",
              _obj({"device": S, "tail_chars": I}, ["device"]), self.read_output),
             ("pt_ping",
@@ -91,7 +107,7 @@ class Tools:
             ("pt_router_config",
              "Configura un router desde una descripcion: hostname, interfaces(port,ip,mask,vlan para subinterfaces), "
              "static_routes, default_route, ospf, eigrp, rip, dhcp_pools, extra. Ver docs/herramientas.md.",
-             _obj({"device": S, "spec": {"type": "object"}}, ["device", "spec"]), self.router_config),
+             _obj({"device": S, "spec": {"type": "object"}, "save": B}, ["device", "spec"]), self.router_config),
             ("pt_switch_config",
              "Configura un switch desde una descripcion: hostname, vlans, access_ports, trunk_ports, svi, extra.",
              _obj({"device": S, "spec": {"type": "object"}}, ["device", "spec"]), self.switch_config),
@@ -120,6 +136,12 @@ class Tools:
              "autoposicionado y puertos automaticos (usa port '@VECINO' en interfaces/puertos para referirte al puerto que enlaza con VECINO). "
              "dry_run=true solo valida. Ver docs/ejemplos.md.",
              _obj({"plan": {"type": "object"}, "dry_run": B}, ["plan"]), self.build_topology),
+            ("pt_class_plan",
+             "Genera (y con build=true construye) una red con las CONVENCIONES DE CLASE de reglas.md a partir del enunciado: "
+             "spec={server_switch, servers:[{name, ip, services?, dhcp?}], sites:[{name, pcs, laptops}], hosts_dhcp?, notes?}. "
+             "Pone nombres por ultimo octeto desde la .10, puertos justos, cables, posiciones del esquema, gateway .1 y DNS. "
+             "Sin build devuelve el plan para revisarlo.",
+             _obj({"spec": {"type": "object"}, "build": B}, ["spec"]), self.class_plan),
             ("pt_clear_workspace",
              "Borra TODOS los dispositivos. Exige confirm=true.",
              _obj({"confirm": B}, ["confirm"]), self.clear_workspace),
@@ -189,11 +211,14 @@ class Tools:
         spec = catalog.empty_module_spec(model)
         if spec:
             ports = args.get("ports")
-            ports = spec["slots"] if ports is None else ports
+            ports = spec["default"] if ports is None else ports
             if isinstance(ports, bool) or not isinstance(ports, int) or not 1 <= ports <= spec["slots"]:
                 raise ToolError("'ports' debe ser un entero entre 1 y %d para %s" % (spec["slots"], model))
             modules = (spec["module"], spec["type"], ports)
         out = self._run(jsgen.add_device(name, model, dtype, x, y, dtype in catalog.BOOTING_TYPES, modules))
+        if x is not None and y is not None:
+            # Un equipo recien creado se recoloca solo al terminar el script que lo crea: se ajusta en otra llamada.
+            self._run(jsgen.move_device(name, x, y))
         note = "" if verified else " (modelo sin verificar en 6.0.1)"
         if modules:
             note += " con %d puertos FastEthernet (modulos %s)" % (modules[2], modules[0])
@@ -215,10 +240,30 @@ class Tools:
         d1, p1 = self._req(args, "device1"), self._req(args, "port1")
         d2, p2 = self._req(args, "device2"), self._req(args, "port2")
         out = self._run(jsgen.add_link(d1, p1, d2, p2, code))
-        if out.strip().lower() != "true":
+        first, _, warn = out.strip().partition("\n")
+        if first.strip().lower() != "true":
             raise ToolError("PT rechazo el cable %s %s <-> %s %s. Causas habituales: puerto ya ocupado, "
                             "nombre de puerto incorrecto o tipo de cable incompatible." % (d1, p1, d2, p2))
-        return "OK cable %s:%s <-> %s:%s (codigo %d)" % (d1, p1, d2, p2, code)
+        return "OK cable %s:%s <-> %s:%s (codigo %d)%s" % (d1, p1, d2, p2, code, ("\n" + warn) if warn else "")
+
+    def add_note(self, args):
+        text = str(self._req(args, "text"))
+        size = args.get("size") or 10
+        if isinstance(size, bool) or not isinstance(size, int) or not 6 <= size <= 72:
+            raise ToolError("'size' debe ser un entero entre 6 y 72")
+        return self._run(jsgen.add_note(self._req(args, "x"), self._req(args, "y"), text, size))
+
+    def list_notes(self, args):
+        out = self._run(jsgen.list_notes())
+        if not out.strip():
+            return "(sin notas)"
+        return "\n".join(["id | x | y"] + [" | ".join(line.split("\t")) for line in out.split("\n")])
+
+    def remove_note(self, args):
+        nid = self._req(args, "id")
+        if self._run(jsgen.remove_note(nid)).strip().lower() != "true":
+            raise ToolError("PT no borro la nota %s (id incorrecto?)" % nid)
+        return "OK nota borrada"
 
     def remove_link(self, args):
         dev, port = self._req(args, "device"), self._req(args, "port")
@@ -226,6 +271,20 @@ class Tools:
         if out.strip().lower() != "true":
             raise ToolError("PT no quito el cable de %s %s" % (dev, port))
         return "OK cable quitado de %s:%s" % (dev, port)
+
+    def add_module(self, args):
+        dev = self._req(args, "device")
+        slot = self._req(args, "slot")
+        if isinstance(slot, bool) or not isinstance(slot, int) or slot < 0:
+            raise ToolError("'slot' debe ser un entero >= 0")
+        model = self._run(jsgen.wrap(jsgen.get_dev("d", dev) + " return String(d.getModel());"))
+        if model not in catalog.MODULES:
+            raise ToolError("Solo se anaden modulos a %s (este equipo es %s)" % (" y ".join(sorted(catalog.MODULES)), model))
+        mtype, kinds = catalog.MODULES[model]
+        kind = str(args.get("kind") or "fastethernet").strip().lower()
+        if kind not in kinds:
+            raise ToolError("kind desconocido para %s: %s. Opciones: %s" % (model, kind, ", ".join(sorted(kinds))))
+        return self._run(jsgen.add_module(dev, slot, mtype, kinds[kind]))
 
     def remove_module(self, args):
         slot = self._req(args, "slot")
@@ -259,6 +318,9 @@ class Tools:
         out = self._run(jsgen.cli(self._req(args, "device"), [str(c) for c in commands],
                                   args.get("answer_initial_dialog", True)), timeout)
         return _clip(out)
+
+    def running_config(self, args):
+        return _clip(self._run(jsgen.running_config(self._req(args, "device"))), 20000)
 
     def read_output(self, args):
         tail = int(args.get("tail_chars") or 1500)
@@ -387,9 +449,15 @@ class Tools:
                 txt = "    %s" % f[1]
                 if f[2] and f[2] != "0.0.0.0":
                     txt += " ip=%s/%s %s" % (f[2], f[3], "DHCP" if f[4] == "true" else "estatica")
-                if len(f) >= 8:
+                if len(f) >= 8 and f[5] == "wifi":
+                    txt += " (inalambrico)"
+                elif len(f) >= 8:
                     txt += " --%s--> %s:%s" % (cables.get(f[5], f[5]), f[6], f[7])
                 rows.append(txt)
+            elif f[0] == "G":
+                if not f[1] and (len(f) < 3 or f[2] in ("", "0.0.0.0")):
+                    continue                              # switches: tienen DnsClient pero sin gateway ni DNS
+                rows.append("    gateway=%s dns=%s" % (f[1] or "-", f[2] if len(f) > 2 and f[2] and f[2] != "0.0.0.0" else "-"))
             elif f[0] == "S":
                 rows.append("    servicios: %s" % f[1])
             elif f[0] == "L":
@@ -398,6 +466,25 @@ class Tools:
 
     def describe(self, args):
         return _clip(self._run(jsgen.describe(self._req(args, "device"), args.get("process") or "", args.get("port") or "")))
+
+    def class_plan(self, args):
+        try:
+            plan = planmod.class_plan(args.get("spec"))
+        except (planmod.PlanError, KeyError, ValueError, TypeError) as exc:
+            raise ToolError("spec invalida: %s" % exc)
+        if args.get("build"):
+            return self.build_topology({"plan": plan})
+        hosts = plan["hosts"]
+        lines = ["Plan de clase: %d dispositivos, %d cables, equipos %s-%s." %
+                 (len(plan["devices"]), len(plan["links"]), hosts[0]["device"], hosts[-1]["device"])]
+        for d in plan["devices"]:
+            extra = (" (%d puertos)" % d["ports"]) if d.get("ports") else ""
+            lines.append("  %s | %s | x=%d y=%d%s" % (d["name"], d["model"], d["x"], d["y"], extra))
+        for l in plan["links"]:
+            lines.append("  %s:%s --%s--> %s:%s" % (l["a"], l["port_a"], l["cable"], l["b"], l["port_b"]))
+        lines.append("JSON del plan (para pt_build_topology):")
+        lines.append(json.dumps(plan, ensure_ascii=False))
+        return _clip("\n".join(lines), 60000)
 
     def clear_workspace(self, args):
         if args.get("confirm") is not True:
@@ -447,7 +534,7 @@ class Tools:
         def do_link(l):
             out = self.connect({"device1": l["a"], "device2": l["b"], "cable": l.get("cable") or "auto",
                                 "port1": l.get("port_a") or "", "port2": l.get("port_b") or ""})
-            m = re.match(r"OK .*:(\S+) <-> .*:(\S+)\s*$", out.strip())
+            m = re.match(r"OK .*:(\S+) <-> .*:(\S+)\s*$", out.strip().split("\n")[0])
             if m:
                 ports_for.setdefault(l["a"], {})[l["b"]] = m.group(1)
                 ports_for.setdefault(l["b"], {})[l["a"]] = m.group(2)
@@ -498,6 +585,8 @@ class Tools:
                  lambda sw=sw: self.switch_config({"device": sw["device"], "spec": resolved(sw)}))
         for c in plan.get("cli", []):
             step("cli %s" % c["device"], lambda c=c: self.cli({"device": c["device"], "commands": c["commands"]}))
+        for n in plan.get("notes", []):
+            step("nota %s" % n.get("text"), lambda n=n: self.add_note(n))
         report.append("")
         report.append("Resumen: %d pasos correctos, %d con error." % (ok[0], bad[0]))
         if bad[0]:

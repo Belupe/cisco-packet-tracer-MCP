@@ -140,6 +140,110 @@ def auto_layout(devices, links, origin=(80, 60), dx=130, dy=150):
     return placed
 
 
+def class_mask(ip):
+    """Mascara por clase, como se usa en clase: 10.x -> /8, 172.26.x -> /16, 192.168.x -> /24."""
+    first = int(str(ip).split(".")[0])
+    return "255.0.0.0" if first < 128 else ("255.255.0.0" if first < 192 else "255.255.255.0")
+
+
+# Medidas del esquema de clase (reglas.md, seccion 7). Son las coordenadas que devuelve pt_snapshot.
+CLASS_LAYOUT = {"server_x": 40, "server_dy": 130, "server_switch_x": 195, "site_x": 455, "site_y0": 110,
+                "site_dy": 290, "row_up": 88, "row_down": 85, "host_x0": 140, "host_dx": 145,
+                "note_dx": -12, "note_dy": -48}       # nota justo encima del servidor (asi la coloco el usuario)
+
+
+def class_plan(spec):
+    """Genera un plan completo con las convenciones de clase (reglas.md) a partir de lo que dice un enunciado.
+
+    spec = {"server_switch": "SW-ServerMadrid",
+            "servers": [{"name": "HTTP", "ip": "172.26.1.3"}, {"name": "DNS", "ip": "172.26.1.2"}],
+            "sites": [{"name": "SW-Goya", "pcs": 3, "laptops": 2}, ...],        # en el orden del enunciado
+            "hosts_dhcp": false, "first_host": 10, "notes": true}
+    Opcionales: "mask", "gateway", "dns" (por defecto la IP del servidor llamado DNS, si lo hay) y, por servidor,
+    "services": [...] y "dhcp": {...} SOLO si el enunciado pide configurar ese servicio.
+    """
+    if not isinstance(spec, dict):
+        raise PlanError("spec debe ser un objeto")
+    servers, sites = spec.get("servers") or [], spec.get("sites") or []
+    if not servers or not sites:
+        raise PlanError("spec necesita 'servers' y 'sites' (al menos uno de cada)")
+    sw_name = str(spec.get("server_switch") or "").replace(" ", "")
+    if not sw_name:
+        raise PlanError("spec necesita 'server_switch' (el nombre que da el enunciado, p. ej. SW-ServerMadrid)")
+    try:
+        for s in servers:
+            ios.check_ip(s["ip"], "servidor %s" % s.get("name"))
+    except (KeyError, ios.ConfigError) as exc:
+        raise PlanError("servidor sin IP valida: %s" % exc)
+    prefix = servers[0]["ip"].rsplit(".", 1)[0]
+    mask = spec.get("mask") or class_mask(servers[0]["ip"])
+    gateway = spec.get("gateway") or prefix + ".1"
+    dns = spec.get("dns")
+    if dns is None:
+        dns = next((s["ip"] for s in servers if str(s.get("name", "")).upper().startswith("DNS")), "")
+    L = CLASS_LAYOUT
+    dhcp = bool(spec.get("hosts_dhcp"))
+    devices, links, hosts, plan_servers, notes = [], [], [], [], []
+
+    site_ys = [L["site_y0"] + i * L["site_dy"] for i in range(len(sites))]
+    sw_y = int(sum(site_ys) / len(site_ys))
+    devices.append({"name": sw_name, "model": "Switch-PT-Empty", "x": L["server_switch_x"], "y": sw_y,
+                    "ports": len(servers) + len(sites)})
+    y0 = sw_y - (len(servers) - 1) * L["server_dy"] // 2
+    for i, s in enumerate(servers):                      # servidores: columna a la izquierda, primeros puertos
+        name, y = str(s["name"]), y0 + i * L["server_dy"]
+        devices.append({"name": name, "model": "Server-PT", "x": L["server_x"], "y": y})
+        links.append({"a": sw_name, "port_a": "FastEthernet%d/1" % i, "b": name, "port_b": "FastEthernet0",
+                      "cable": "straight"})
+        entry = {"device": name, "ip": s["ip"], "mask": mask, "gateway": gateway}
+        if dns:
+            entry["dns_server"] = dns
+        for key in ("services", "dhcp", "dns"):          # solo si el enunciado configura el servicio
+            if key in s:
+                entry[key] = s[key]
+        plan_servers.append(entry)
+        if spec.get("notes", True):
+            notes.append({"text": s["ip"], "x": L["server_x"] + L["note_dx"], "y": y + L["note_dy"]})
+
+    # Numeracion: sede de abajo primero; en cada sede portatiles y luego PCs; el mas bajo a la derecha.
+    number = int(spec.get("first_host") or 10)
+    numbers = {}
+    for si in range(len(sites) - 1, -1, -1):
+        for kind in ("laptops", "pcs"):
+            count = int(sites[si].get(kind) or 0)
+            for col in range(count - 1, -1, -1):
+                numbers[(si, kind, col)] = number
+                number += 1
+    if number - 1 > 254:
+        raise PlanError("Demasiados equipos para un solo ultimo octeto (%d)" % (number - 1))
+
+    for si, site in enumerate(sites):
+        sname, sy = str(site["name"]).replace(" ", ""), site_ys[si]
+        pcs, laps = int(site.get("pcs") or 0), int(site.get("laptops") or 0)
+        devices.append({"name": sname, "model": "Switch-PT-Empty", "x": L["site_x"], "y": sy, "ports": 1 + pcs + laps})
+        links.append({"a": sw_name, "port_a": "FastEthernet%d/1" % (len(servers) + si), "b": sname,
+                      "port_b": "FastEthernet0/1", "cable": "cross"})
+        port = 1
+        for kind, model, count, y in (("pcs", "PC-PT", pcs, sy - L["row_up"]),
+                                      ("laptops", "Laptop-PT", laps, sy + L["row_down"])):
+            for col in range(count):                     # de izquierda a derecha: puertos seguidos
+                n = numbers[(si, kind, col)]
+                devices.append({"name": str(n), "model": model, "x": L["site_x"] + L["host_x0"] + col * L["host_dx"], "y": y})
+                links.append({"a": sname, "port_a": "FastEthernet%d/1" % port, "b": str(n), "port_b": "FastEthernet0",
+                              "cable": "straight"})
+                port += 1
+                host = {"device": str(n), "dhcp": True} if dhcp else \
+                    {"device": str(n), "ip": "%s.%d" % (prefix, n), "mask": mask, "gateway": gateway}
+                if dns and not dhcp:
+                    host["dns"] = dns
+                hosts.append(host)
+    hosts.sort(key=lambda h: int(h["device"]))            # con DHCP, pedir IP en orden de nombre
+    plan = {"devices": devices, "links": links, "hosts": hosts, "servers": plan_servers}
+    if notes:
+        plan["notes"] = notes
+    return plan
+
+
 def resolve_ports(obj, neighbour_ports):
     """Sustituye '@VECINO' por el puerto real que conecta con ese vecino (recursivo).
 

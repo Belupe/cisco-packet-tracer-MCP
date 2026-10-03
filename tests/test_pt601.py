@@ -132,14 +132,17 @@ class FakeBridge:
 
 class ToolTests(unittest.TestCase):
     def test_add_device_validates_and_builds_two_arg_call(self):
-        fb = FakeBridge(["OK Router0 -> R1"])
+        fb = FakeBridge(["OK Router0 -> R1", "OK 10,20"])
         out = Tools(fb).call("pt_add_device", {"name": "R1", "model": "2911", "x": 10, "y": 20})
         self.assertIn("OK", out)
         js = fb.sent[0]
         self.assertIn("lw.addDevice(0, \"2911\")", js)          # solo tipo y modelo en la 6.0.1
         self.assertIn("d.moveToLocation(10, 20)", js)
-        # 6.0.1 real: moveToLocation usa la esquina del icono y getXCoordinate el centro; se corrige el desfase.
-        self.assertIn("d.moveToLocation(10 - (d.getXCoordinate() - 10), 20 - (d.getYCoordinate() - 20))", js)
+        # 6.0.1 real: moveToLocation usa la esquina del icono y getXCoordinate el centro, y un equipo recien creado
+        # se recoloca solo al acabar el script: el ajuste fino va en una SEGUNDA llamada.
+        self.assertNotIn("getXCoordinate", js)
+        self.assertEqual(len(fb.sent), 2)
+        self.assertIn("d.moveToLocation(10 - (d.getXCoordinate() - 10), 20 - (d.getYCoordinate() - 20))", fb.sent[1])
         self.assertIn("skipBoot", js)
         self.assertIn("ya existe", js)                          # guarda contra duplicados
 
@@ -232,6 +235,85 @@ class ToolTests(unittest.TestCase):
             Tools(FakeBridge([])).call("pt_set_ip", {"device": "10", "ip": "192.168.1.10", "mask": "255.255.255.0",
                                                      "dns": "no-es-ip"})
 
+    def test_links_warn_when_devices_are_physically_far(self):
+        # 6.0.1 real: cobre entre un equipo del archivo (1918,1918) y uno nuevo (0,0) = cable sin senal.
+        fb = FakeBridge(["true\nAVISO: los dos equipos estan a 2713 m", "OK A:FastEthernet2/1 <-> B:FastEthernet0/0\nAVISO: lejos"])
+        t = Tools(fb)
+        out = t.call("pt_add_link", {"device1": "A", "port1": "FastEthernet2/1", "device2": "B",
+                                     "port2": "FastEthernet0/0", "cable": "straight"})
+        self.assertIn("OK cable", out)
+        self.assertIn("AVISO", out)
+        self.assertIn("farWarn(a, b, 8100)", fb.sent[0])
+        self.assertIn("X_COORD", fb.sent[0])
+        self.assertIn("AVISO", t.call("pt_connect", {"device1": "A", "device2": "B", "cable": "straight"}))
+        self.assertIn("farWarn(a, b, codes[k])", fb.sent[1])
+        self.assertIn("code == 8103", fb.sent[1])          # con fibra no se avisa
+
+    def test_add_module_and_wifi_snapshot(self):
+        fb = FakeBridge(["Router-PT-Empty", "OK puerto nuevo: FastEthernet2/0"])
+        out = Tools(fb).call("pt_add_module", {"device": "R1", "slot": 2, "kind": "fiber"})
+        self.assertIn("FastEthernet2/0", out)
+        self.assertIn('d.addModule("2", 3, "PT-ROUTER-NM-1FFE")', fb.sent[1])
+        self.assertLess(fb.sent[1].index("addModule"), fb.sent[1].index("skipBoot"))   # si no, arranca en tiempo real
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge(["Switch-PT-Empty"])).call("pt_add_module", {"device": "S", "slot": 1, "kind": "serial"})
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge(["PC-PT"])).call("pt_add_module", {"device": "PC", "slot": 0})
+        fb2 = FakeBridge(["OK puertos: 8 -> 7"])
+        Tools(fb2).call("pt_remove_module", {"device": "S", "slot": 6})
+        self.assertIn("skipBoot", fb2.sent[0])
+        snap = Tools(FakeBridge(["D\tLaptop0\tLaptop-PT\t17\t364\t509\nP\tWireless0\t192.168.40.4\t255.255.255.0\ttrue\twifi\t\t"]))
+        out = snap.call("pt_snapshot", {})
+        self.assertIn("Wireless0 ip=192.168.40.4/255.255.255.0 DHCP (inalambrico)", out)
+        self.assertIn('typeof lk.getPort1 != "function"', snap.bridge.sent[0])
+
+    def test_cli_wakes_idle_console_before_first_command(self):
+        # 6.0.1 real: consola sin usar = modo "logout", prompt vacio; el primer comando se perdia.
+        fb = FakeBridge(["PROMPT=Router#\n"])
+        Tools(fb).call("pt_cli", {"device": "R1", "commands": ["enable"]})
+        js = fb.sent[0]
+        self.assertIn('String(cl.getMode()) == "logout"', js)
+        self.assertLess(js.index('cl.enterCommand("")'), js.index('var cmds = ["enable"]'))
+
+    def test_running_config_comes_from_xml(self):
+        fb = FakeBridge(["hostname Router\ninterface FastEthernet0/0\n ip address 192.168.1.2 255.255.255.0"])
+        out = Tools(fb).call("pt_running_config", {"device": "router firewall"})
+        self.assertIn("ip address 192.168.1.2", out)
+        self.assertIn('x.indexOf("<RUNNINGCONFIG>")', fb.sent[0])
+        self.assertNotIn("enterCommand", fb.sent[0])       # sin consola: no hay --More--
+        self.assertNotIn("\n", fb.sent[0])
+
+    def test_router_pt_empty_gets_router_modules(self):
+        # 6.0.1 real: Router-PT-Empty usa tipo de modulo 3 y PT-ROUTER-NM-1CFE (puertos FastEthernet<n>/0).
+        fb = FakeBridge(["OK Router0 -> R1", "OK Router0 -> R2"])
+        t = Tools(fb)
+        out = t.call("pt_add_device", {"name": "R1", "model": "Router-PT-Empty"})
+        self.assertIn('d.addModule(String(s), 3, "PT-ROUTER-NM-1CFE")', fb.sent[0])
+        self.assertIn("s < 2", fb.sent[0])                # 2 puertos por defecto en el router
+        self.assertIn("2 puertos", out)
+        t.call("pt_add_device", {"name": "R2", "model": "Router-PT-Empty", "ports": 4})
+        self.assertIn("s < 4", fb.sent[1])
+
+    def test_dns_server_warns_records_do_not_resolve(self):
+        fb = FakeBridge(["OK 1 registro(s) DNS anotados. AVISO"])
+        Tools(fb).call("pt_dns_server", {"device": "DNS", "records": [{"name": "www.clase.com", "ip": "172.26.1.3"}]})
+        self.assertIn("AVISO", fb.sent[0])
+        self.assertLess(fb.sent[0].index('"DnsServer"'), fb.sent[0].index('"DnsServerMain"'))
+
+    def test_notes_use_real_addnote_signature(self):
+        # 6.0.1 real: addNote(x, y, tamano, texto) devuelve el id; removeCanvasItem(id) la borra.
+        fb = FakeBridge(["OK {abc} en 129,106", "{abc}\t129\t106", "true"])
+        t = Tools(fb)
+        self.assertIn("{abc}", t.call("pt_add_note", {"text": "192.168.1.3", "x": 100, "y": 100}))
+        self.assertIn('lw.addNote(100, 100, 10, "192.168.1.3")', fb.sent[0])
+        self.assertIn("{abc} | 129 | 106", t.call("pt_list_notes", {}))
+        self.assertNotIn("\n", fb.sent[1])                # el JS no puede llevar saltos ni tabuladores reales
+        self.assertNotIn("\t", fb.sent[1])
+        t.call("pt_remove_note", {"id": "{abc}"})
+        self.assertIn('lw.removeCanvasItem("{abc}")', fb.sent[2])
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge([])).call("pt_add_note", {"text": "x", "x": 1, "y": 1, "size": 500})
+
     def test_remove_link_and_module_use_real_signatures(self):
         fb = FakeBridge(["true", "OK puertos: 8 -> 7"])
         t = Tools(fb)
@@ -272,10 +354,12 @@ class ToolTests(unittest.TestCase):
         raw = "\n".join([
             "D\tServer DHCP\tServer-PT\t9\t65\t357",
             "P\tFastEthernet0\t192.168.1.3\t255.255.255.0\tfalse\t8100\tSW-ServidorDHCP\tFastEthernet2/1",
+            "G\t192.168.1.1\t0.0.0.0",
             "S\tdhcp=true dns=false",
             "L\tserverPool\t192.168.1.3\t192.168.1.255\t255.255.255.0\t192.168.1.1\t0.0.0.0",
             "D\tSW-Madrid\tSwitch-PT-Empty\t1\t388\t166",
             "P\tFastEthernet0/1\t\t\t\t8101\tSW-ServidorDHCP\tFastEthernet0/1",
+            "G\t\t0.0.0.0",
             "D\tCopy10\tLaptop-PT\t17\t1313\t558",
             "P\tFastEthernet0\t192.168.1.5\t255.255.255.0\ttrue\t8100\tCopySW-Cadiz\tFastEthernet4/1"] * 40)
         fb = FakeBridge([raw])
@@ -285,6 +369,9 @@ class ToolTests(unittest.TestCase):
         self.assertIn("FastEthernet0/1 --cross--> SW-ServidorDHCP:FastEthernet0/1", out)
         self.assertIn("ip=192.168.1.5/255.255.255.0 DHCP", out)
         self.assertIn("servicios: dhcp=true dns=false", out)
+        self.assertIn("gateway=192.168.1.1 dns=-", out)
+        self.assertNotIn("gateway=- dns=-", out)          # los switches no ensenan esa linea
+        self.assertIn('d.getProcess("DnsClient")', fb.sent[0])
         self.assertIn("pool serverPool: 192.168.1.3 - 192.168.1.255", out)
         self.assertNotIn("recortado", out)          # una red de clase entera no debe recortarse
         for bad in ("let ", "const ", "=>", "JSON."):

@@ -287,3 +287,73 @@ de confirmar» en `reglas.md`. Si el repositorio es público, quitar datos perso
 - **Cables nuevos entre switches tardan ~30–50 s en dejar pasar tráfico** (STP): el primer ping tras recablear o tras apagar/encender un switch falla entero
   o casi; esperar y repetir antes de dar la prueba por mala.
 - Herramienta nueva `pt_remove_module` (`removeModule("<ranura>")`, apagando y encendiendo). 28 herramientas, 50 pruebas.
+
+## 2026-10-03: investigación libre en un archivo vacío (notas, router vacío, DNS, posiciones) y generador de planes de clase
+- **Notas del mapa:** `lw.addNote(x, y, tamaño_letra, "texto")` -> id `{uuid}` (4 argumentos; comprobado). `lw.getCanvasItemIds()` (lista separada por comas),
+  `getCanvasItemX(id)/getCanvasItemY(id)` (devuelven ~x+26, y+6 respecto a lo pedido para un texto tipo IP) y `lw.removeCanvasItem(id)` -> true.
+  El texto de una nota no se puede leer. Herramientas `pt_add_note`, `pt_list_notes`, `pt_remove_note`; sección `notes` en los planes.
+- **`Router-PT-Empty`:** nace sin puertos y con 10 ranuras. `addModule("<ranura>", 3, modelo)` (tipo de módulo **3**; el del switch es 4). Modelos que acepta
+  y puerto que dan: `PT-ROUTER-NM-1CFE` FastEthernet<n>/0, `-1CGE` GigabitEthernet<n>/0, `-1S` y `-1SS` Serial<n>/0, `-1FFE` FastEthernet (fibra),
+  `-1FGE` GigabitEthernet (fibra), `-1CE` Ethernet<n>/0, `-1AM` Modem<n>/0. `pt_add_device` le pone 2 FastEthernet por defecto (`ports` para otro número).
+  Un tipo de módulo equivocado devuelve `false` (no da error IPC), así que se puede sondear en bucle.
+- **Posición de equipos recién creados:** al terminar el script que crea un equipo, PT lo recoloca solo (la x baja medio icono; la y no). Medir el desfase
+  dentro del mismo script no sirve: `pt_add_device` ahora hace el ajuste fino en una segunda llamada (`move_device`), que sí es exacta en equipos asentados.
+- **DNS de Server-PT: limitación sin resolver.** `DnsServer.addIpAddress("nombre", "ip")` devuelve true, `getEntryCount()` sube y `getIpAddOfDomain` devuelve la IP,
+  pero un PC no resuelve el nombre (`nslookup`: *Non-existent domain*; el PC sí llega al servidor) y `<NAMESERVER-DATABASE/>` sigue vacío en el XML, ni
+  reiniciando el servicio. Otros miembros: getEntryAt (objeto con `first`/`second`), isDomainNameExisted, removeIpAddress, get/setPortNumber.
+  `pt_dns_server` avisa de ello. **Siguiente paso:** que el usuario cree un registro A a mano y leer el XML del servidor para ver cómo se guarda.
+- **`pt_class_plan`** (`plan.class_plan`): del enunciado (switch de servidores, servidores con IP, sedes con nº de PCs/portátiles) saca el plan completo con las
+  reglas de clase. Probado en PT real con una red reducida (2 servidores, 2 sedes, 6 equipos): 29 pasos sin error, posiciones exactas tras el ajuste,
+  gateway/DNS correctos y ping al servidor. Los servicios solo entran en el plan si se indican (`services`, `dhcp`).
+- Los switches también tienen proceso `DnsClient` (sin uso): `pt_snapshot` solo muestra gateway/DNS cuando hay alguno puesto. 32 herramientas, 58 pruebas.
+
+## 2026-10-03: quinto archivo analizado (`ESQUEMA1.pkt`: 4 routers, 8 redes, rutas estáticas) y dos arreglos de consola
+- Primera llamada real a `pt_snapshot` como herramienta (tras recargar VS Code): funciona y lee también los routers (IP por interfaz).
+- **Este archivo es del curso pasado y NO es fuente de reglas** (dicho por el usuario): sirve para mejorar las herramientas, no para `reglas.md`.
+  Lo que contiene, como referencia técnica: `Router-PT-Empty` + `PT-ROUTER-NM-1CFE`, un switch entre cada router y lo demás, cable recto,
+  una red /24 por switch, red de tránsito en un switch central, router = `.1` de cada LAN, PCs en la `.10`, rutas estáticas, nombres de fábrica.
+  Las reglas de routers siguen `PENDIENTE` hasta ver una práctica de este curso.
+- **Consola dormida:** una consola sin usar está en `getMode() == "logout"` con `getPrompt() == ""`; el primer `enterCommand` solo la despierta y se pierde
+  (se perdía el `enable` y los `show` daban «Invalid input» en modo usuario). `jsgen.cli` ahora manda un Enter antes si la ve así.
+- **`terminal length 0` no existe** en el IOS de la 6.0.1 y `show running-config` se queda en `--More--` (se sale mandando `q`). Para leer la configuración
+  entera: `serializeToXml()` → `<RUNNINGCONFIG><LINE>…`. Herramienta nueva `pt_running_config`. `show ip route` y `show ip protocols` caben sin paginar.
+- Las rutas puestas desde la pestaña Config de PT aparecen como `ip route <red> <máscara> <siguiente salto>`. 33 herramientas, 60 pruebas.
+
+## 2026-10-03: retos libres sobre `4.pkt` (archivo del curso pasado; NO es fuente de reglas, solo de herramientas)
+Archivo: 2 routers `Router-PT-Empty`, 2 LAN con Server-PT DHCP, 2 `AccessPoint-PT` con WPA2-PSK y portátiles wifi, red de tránsito por un switch.
+
+**Reto 1: tercera red con router nuevo, DHCP en el router y rutas estáticas — conseguido** (pings cruzados entre las 3 LAN, también desde wifi).
+- `pt_router_config` validado en PT real con un `Router-PT-Empty` nuevo: responde solo al diálogo inicial, interfaces, rutas estáticas y `dhcp_pools`
+  (el pool del router repartió `.10` y `.11` con `excluded` `.1`–`.9`).
+- **Trampa grande — distancia física.** Cada equipo tiene una posición física (`<COORD_SETTINGS><X_COORD>` en `serializeToXml`). Los que vienen en un
+  archivo hecho a mano están en ~(1918, 1918); los creados por IPC nacen en (0, 0). **Un cable de cobre entre uno y otro se crea (`createLink` = true) pero
+  queda sin señal**: puerto del switch `down/down`, interfaz del router `up / protocol down (disabled)`. Nuevo↔nuevo y viejo↔viejo funcionan.
+  La **fibra sí funciona** (`PT-SWITCH-NM-1FFE` + `PT-ROUTER-NM-1FFE`, cable 8103; los puertos se siguen llamando `FastEthernet<n>/…`).
+  `device.moveToLocInPhysicalWS(x, y)` devuelve false (también en equipos antiguos) y `getXPhysicalWS()` da -1: no se puede acercar el equipo por IPC;
+  `getGeoView()`/`getRackView()` no exponen nada útil. `pt_connect`/`pt_add_link` ahora **avisan** cuando la distancia supera 100 y el cable no es fibra.
+  Consecuencia práctica: ampliar un `.pkt` existente con equipos nuevos exige fibra en los enlaces nuevo↔antiguo; construir desde cero no tiene este problema.
+- **`setPower(false/true)` sin `skipBoot()` deja el equipo arrancando en tiempo real (minutos)**, con la consola en el cargador y sin servicio.
+  `pt_remove_module` y el nuevo `pt_add_module` llaman a `skipBoot()`.
+- **Un reinicio pierde la configuración no guardada**: tras configurar un router hay que hacer `write memory` (`save: true` en `pt_config` /
+  `pt_router_config`, ahora también en el esquema de esta última).
+- Añadir un módulo a un equipo ya creado funciona (`pt_add_module`): `addModule("<ranura>", tipo, modelo)` con tipo 4 en switch, 3 en router y
+  **9 en portátil**. Quitar el módulo de cobre de un portátil: `removeModule("0")`.
+- En un `.pkt` hecho a mano no vale suponer que `Fa0/1` del switch va al router: leer siempre los enlaces antes de tocar (me equivoqué una vez).
+- Si mientras trabajo aparecen comandos que no he enviado en una consola (p. ej. `router rip`) o un equipo se reinicia, es el usuario tocando PT a la vez:
+  volver a leer el estado antes de seguir.
+
+**Reto 2: celda inalámbrica creada por IPC — conseguido.**
+- Punto de acceso: `AccessPoint-PT` (puertos `Port 0` = cable, `Port 1` = radio). Proceso `WirelessServer`: getSsid/setSsid, getAuthenType,
+  getWepProcess, resetAllAssociations. Por defecto SSID `Default` sin clave.
+- Portátil inalámbrico: apagar, `removeModule("0")`, `addModule("0", 9, "PT-LAPTOP-NM-1W")` → puerto `Wireless0`. Proceso `WirelessClient`:
+  setSsid/getSsid, getCurrentApMac (asociado si devuelve una MAC), perfiles (addProfile, setCurrentProfile…). `PT-LAPTOP-NM-1W-A` es la variante 802.11a.
+- El enlace de un puerto inalámbrico es un objeto `Antenna` (sin `getPort1/getPort2`): rompía `pt_snapshot`; ahora lo marca como «inalámbrico».
+- Con el mismo SSID en AP y portátil y DHCP activado, el portátil recibió IP del pool del router y respondió a ping entre redes.
+- Pendiente: claves WPA (`getWepProcess`, sin explorar) y una herramienta `pt_wireless` que empaquete todo esto.
+
+**Otros**
+- `pt_ping` (y cualquier comando) lanzado en un PC mientras otro comando asíncrono (`ipconfig /renew`) sigue en marcha se pierde: esperar a que vuelva el prompt.
+- En un router, una palabra que no es un comando en modo usuario (`end`) dispara «Translating… domain server» y bloquea la consola varios segundos.
+- `NtpServer` del Server-PT: setEnabled/isEnabled, setKeyID/getKeyId, getServerMd5Str. `ntp server <ip>` en el router: sin comprobar todavía.
+- Prueba intermitente arreglada: el puente contesta 404 a un POST desconocido **después** de leer el cuerpo (en Windows la conexión se cortaba a veces).
+- 33 herramientas, 62 pruebas.
