@@ -24,6 +24,14 @@ def get_dev(var, name):
             % (var, var, q(name), var, var, q(name)))
 
 
+def _move(x, y):
+    """Coloca `d` de modo que getXCoordinate/getYCoordinate devuelvan (x, y). En la 6.0.1 real moveToLocation
+    recibe la esquina del icono y los getters devuelven su centro (servidor +16,+26; switch +25,+12): se mide el
+    desfase tras un primer movimiento y se corrige. Asi las coordenadas de pt_snapshot sirven tal cual para colocar."""
+    return ("d.moveToLocation(%d, %d); d.moveToLocation(%d - (d.getXCoordinate() - %d), %d - (d.getYCoordinate() - %d));"
+            % (int(x), int(y), int(x), int(x), int(y), int(y)))
+
+
 def status():
     return wrap('return ipc.appWindow().getVersion() + "|" + net.getDeviceCount();')
 
@@ -38,7 +46,7 @@ def list_devices():
 
 def add_device(name, model, dtype, x, y, skip_boot, modules=None):
     """`modules` = (modelo_modulo, tipo_modulo, n_ranuras) para los modelos Empty (sin puertos)."""
-    move = ("d.moveToLocation(%d, %d);" % (int(x), int(y))) if x is not None and y is not None else ""
+    move = _move(x, y) if x is not None and y is not None else ""
     boot = "try { d.skipBoot(); } catch (e2) {}" if skip_boot else ""
     mods = ""
     if modules:
@@ -68,13 +76,31 @@ def remove_device(name):
 
 
 def move_device(name, x, y):
-    return wrap(get_dev("d", name) + ' d.moveToLocation(%d, %d); return "OK";' % (int(x), int(y)))
+    return wrap(get_dev("d", name) + ' ' + _move(x, y) +
+                ' return "OK " + d.getXCoordinate() + "," + d.getYCoordinate();')
 
 
 def add_link(d1, p1, d2, p2, code):
     return wrap(
         get_dev("a", d1) + get_dev("b", d2) +
         ' return String(lw.createLink(%s, %s, %s, %s, %d));' % (q(d1), q(p1), q(d2), q(p2), int(code)))
+
+
+def remove_link(name, port):
+    return wrap(
+        get_dev("d", name) +
+        ' var p = d.getPort(%s); if (!p) { return "ERROR: no existe el puerto " + %s; }'
+        ' if (!p.getLink()) { return "ERROR: el puerto " + %s + " de " + %s + " no tiene cable"; }'
+        ' return String(lw.deleteLink(%s, %s));' % (q(port), q(port), q(port), q(name), q(name), q(port)))
+
+
+def remove_module(name, slot):
+    """Quita el modulo de una ranura (firma real de la 6.0.1: removeModule("<ranura>"), con el equipo apagado)."""
+    return wrap(
+        get_dev("d", name) +
+        ' var n0 = d.getPortCount(); d.setPower(false); var r = d.removeModule(%s); d.setPower(true);'
+        ' if (!r) { return "ERROR: PT no quito el modulo de la ranura " + %s + " de " + %s; }'
+        ' return "OK puertos: " + n0 + " -> " + d.getPortCount();' % (q(int(slot)), q(int(slot)), q(name)))
 
 
 def set_ip(name, port, ip, mask, gateway, dhcp, dns=None):

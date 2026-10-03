@@ -57,6 +57,12 @@ class Tools:
              "Ej.: port1='GigabitEthernet0/0', port2='FastEthernet0/1'.",
              _obj({"device1": S, "port1": S, "device2": S, "port2": S, "cable": S},
                   ["device1", "port1", "device2", "port2"]), self.add_link),
+            ("pt_remove_link", "Quita el cable conectado a un puerto de un dispositivo.",
+             _obj({"device": S, "port": S}, ["device", "port"]), self.remove_link),
+            ("pt_remove_module",
+             "Quita el modulo de una ranura (p. ej. un puerto que sobra en un Switch-PT-Empty: ranura n = FastEthernet<n>/1). "
+             "Apaga y enciende el equipo; el puerto debe estar sin cable.",
+             _obj({"device": S, "slot": I}, ["device", "slot"]), self.remove_module),
             ("pt_set_ip",
              "Configura IP en un PC/servidor/laptop (por defecto puerto FastEthernet0): ip, mask, gateway y dns "
              "(servidor DNS de la configuracion IP). dhcp=true activa cliente DHCP.",
@@ -213,6 +219,19 @@ class Tools:
             raise ToolError("PT rechazo el cable %s %s <-> %s %s. Causas habituales: puerto ya ocupado, "
                             "nombre de puerto incorrecto o tipo de cable incompatible." % (d1, p1, d2, p2))
         return "OK cable %s:%s <-> %s:%s (codigo %d)" % (d1, p1, d2, p2, code)
+
+    def remove_link(self, args):
+        dev, port = self._req(args, "device"), self._req(args, "port")
+        out = self._run(jsgen.remove_link(dev, port))
+        if out.strip().lower() != "true":
+            raise ToolError("PT no quito el cable de %s %s" % (dev, port))
+        return "OK cable quitado de %s:%s" % (dev, port)
+
+    def remove_module(self, args):
+        slot = self._req(args, "slot")
+        if isinstance(slot, bool) or not isinstance(slot, int) or slot < 0:
+            raise ToolError("'slot' debe ser un entero >= 0")
+        return self._run(jsgen.remove_module(self._req(args, "device"), slot))
 
     def set_ip(self, args):
         dev = self._req(args, "device")

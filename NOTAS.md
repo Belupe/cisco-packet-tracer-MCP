@@ -268,3 +268,22 @@ de confirmar» en `reglas.md`. Si el repositorio es público, quitar datos perso
   Los cables de los demás puertos se conservan tras apagar y encender.
 - La consola de un PC solo admite `ipconfig <IP> <máscara> [<gateway>]`, `/renew` y `/release`: el DNS no se puede poner por consola.
 - Nueva herramienta `pt_rename_device` (comprueba que el nombre nuevo no exista). 49 pruebas.
+
+## 2026-10-03: cuarto trabajo analizado (Práctica 1A, «Ejercicio 1»: HTTP + DNS, 4 sedes, 172.26.1.0 / 255.255.0.0)
+- Los 22 equipos cumplen todas las reglas (nombre = último octeto, `.10`–`.31`, orden de numeración y de puertos, cables, gateway, DNS, servicios de fábrica).
+- Fallos del archivo (sección 12 de `reglas.md`, sin corregir): `HTTP` sin IP; switch `ServerMadrid` sin el prefijo `SW-` y con un módulo de más;
+  enlaces a las sedes en el switch de servidores fuera del orden de arriba abajo.
+- Orden vertical de los servidores: no hay patrón fijo todavía (P1A y P1B por IP ascendente; P1C en el orden del enunciado, con el DNS `.2` abajo).
+- Para leer un archivo en una sola llamada sin pasar el límite de 6000 caracteres de `pt_eval`: una línea por equipo y nombres de puerto abreviados.
+
+## 2026-10-03: corrección completa de la Práctica 1A por el asistente y más API descubierta
+- Hecho en PT: IP/gateway/DNS del servidor `HTTP`; switch renombrado a `SW-ServerMadrid`; módulo sobrante quitado; los cuatro enlaces a las sedes
+  recableados de arriba abajo; `HTTP` y `DNS` intercambiados de sitio. Verificado: sin puertos libres ni duplicados, 24 equipos con IP/máscara/gateway/DNS
+  correctos y ping a `172.26.1.3` desde `10` (4/4) y `31` (3/4).
+- **`lw.deleteLink("<dispositivo>", "<puerto>")`** -> true (dos argumentos; comprobado). Herramienta nueva `pt_remove_link`.
+- **`moveToLocation(x, y)` y `getXCoordinate()/getYCoordinate()` no usan el mismo punto:** mover a (x, y) y leer devuelve (x+16, y+26) en un Server-PT y
+  (x+25, y+12) en un switch (esquina frente a centro del icono). `jsgen._move` ahora mueve, mide el desfase y corrige, de modo que las coordenadas
+  leídas con `pt_snapshot` valen tal cual para colocar. **Las construcciones anteriores a este cambio quedaban desplazadas esa cantidad.**
+- **Cables nuevos entre switches tardan ~30–50 s en dejar pasar tráfico** (STP): el primer ping tras recablear o tras apagar/encender un switch falla entero
+  o casi; esperar y repetir antes de dar la prueba por mala.
+- Herramienta nueva `pt_remove_module` (`removeModule("<ranura>")`, apagando y encendiendo). 28 herramientas, 50 pruebas.

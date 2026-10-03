@@ -138,6 +138,8 @@ class ToolTests(unittest.TestCase):
         js = fb.sent[0]
         self.assertIn("lw.addDevice(0, \"2911\")", js)          # solo tipo y modelo en la 6.0.1
         self.assertIn("d.moveToLocation(10, 20)", js)
+        # 6.0.1 real: moveToLocation usa la esquina del icono y getXCoordinate el centro; se corrige el desfase.
+        self.assertIn("d.moveToLocation(10 - (d.getXCoordinate() - 10), 20 - (d.getYCoordinate() - 20))", js)
         self.assertIn("skipBoot", js)
         self.assertIn("ya existe", js)                          # guarda contra duplicados
 
@@ -229,6 +231,19 @@ class ToolTests(unittest.TestCase):
         with self.assertRaises(ToolError):
             Tools(FakeBridge([])).call("pt_set_ip", {"device": "10", "ip": "192.168.1.10", "mask": "255.255.255.0",
                                                      "dns": "no-es-ip"})
+
+    def test_remove_link_and_module_use_real_signatures(self):
+        fb = FakeBridge(["true", "OK puertos: 8 -> 7"])
+        t = Tools(fb)
+        self.assertIn("OK", t.call("pt_remove_link", {"device": "SW-A", "port": "FastEthernet2/1"}))
+        self.assertIn('lw.deleteLink("SW-A", "FastEthernet2/1")', fb.sent[0])
+        t.call("pt_remove_module", {"device": "SW-A", "slot": 6})
+        self.assertIn('d.removeModule("6")', fb.sent[1])
+        self.assertLess(fb.sent[1].index("d.setPower(false)"), fb.sent[1].index("d.removeModule"))
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge(["false"])).call("pt_remove_link", {"device": "SW-A", "port": "FastEthernet2/1"})
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge([])).call("pt_remove_module", {"device": "SW-A", "slot": "6"})
 
     def test_rename_checks_duplicates_first(self):
         fb = FakeBridge(["OK 20 -> 10"])

@@ -13,9 +13,12 @@
 > 4. Si una petición o un enunciado contradice una regla, avisa antes de construir y deja que el usuario decida.
 > 5. Antes de construir una red grande, enseña el plan con nombres e IPs (`pt_build_topology` con `dry_run: true`).
 
-Trabajos analizados hasta ahora (2026-10-03): **Práctica 1B — «Ejercicio 2»** (HTTP + DNS, 4 sedes), **Práctica 1C — «Ejercicio 3»**
+Trabajos analizados hasta ahora (2026-10-03): **Práctica 1A — «Ejercicio 1»** (HTTP + DNS, 4 sedes, 172.26.1.x), **Práctica 1B — «Ejercicio 2»**
+(HTTP + DNS, 4 sedes), **Práctica 1C — «Ejercicio 3»**
 (3 HTTP + DNS, 4 sedes) y **Práctica 2 — «Ejercicio 4 DHCP»**. Una regla marcada **(2 de 2)** se vio en la P1C y la P2; la **P1B la cumple
-también** salvo donde se diga lo contrario (son las excepciones de la sección 12).
+también** salvo donde se diga lo contrario (son las excepciones de la sección 12). La **P1A** las cumple igualmente: nombre = último octeto,
+desde la `.10`, sede de abajo primero, portátiles antes que PCs, `Fa0/1` de subida, cruzado entre switches, máscara de clase, gateway `.1`,
+DNS del servidor en todos los equipos y servicios de fábrica. Con cuatro trabajos, estas reglas se dan por firmes.
 
 ---
 
@@ -112,7 +115,8 @@ Los switches son `Switch-PT-Empty` con módulos `PT-SWITCH-NM-1CFE` (un puerto `
     (Fa4/1→SW-Usera, Fa5/1→SW-Arguelles, Fa6/1→SW-Vallecas, Fa7/1→SW-Centro).
   - P2 (un servidor): primero las sedes (Fa0/1→SW-Madrid, Fa1/1→SW-Cadiz) y al final el servidor (Fa2/1).
   - P1B: también **primero los servidores** (Fa0/1→HTTP, Fa1/1→DNS) y luego el enlace hacia las sedes (Fa2/1).
-  - **Regla (2 de 3): servidores primero, en el orden del mapa, y después los enlaces a switches.** La P2 queda como excepción.
+  - P1A: también servidores primero (Fa0/1→HTTP, Fa1/1→DNS) y luego las sedes.
+  - **Regla (3 de 4): servidores primero y después los enlaces a switches de sede, de arriba abajo.** La P2 queda como excepción.
 - **Cables (2 de 2):** switch ↔ switch **cruzado** (línea discontinua); switch ↔ PC/portátil/servidor **recto**. Pasar siempre `cable` explícito
   en el plan (`cross` / `straight`), no `auto`.
 - Puerto del router hacia cada LAN: **PENDIENTE**
@@ -129,6 +133,8 @@ Los switches son `Switch-PT-Empty` con módulos `PT-SWITCH-NM-1CFE` (un puerto `
   (HTTP, HTTPS, DNS, TFTP, FTP, correo, NTP y Syslog apagados). Herramienta: `pt_server_services` (`services: ["dhcp"]`), o
   `"services": ["dhcp"]` en `servers[]` del plan.
 - Los servidores cuelgan **todos del mismo switch de servidores** (`SW-ServidorDHCP`, `SW-ServerMadrid`), nunca del switch de una sede. (2 de 2.)
+- **Orden de los servidores:** el del enunciado, de arriba abajo en el mapa, y en ese mismo orden en los puertos de su switch
+  (P1B: HTTP, DNS; P1C: HTTP-1, HTTP-2, HTTP-3, DNS; P1A tras la corrección: HTTP, DNS).
 - IPs de los servidores: las que dé el enunciado (P1C: DNS `.2`, HTTP-1 `.3`, HTTP-2 `.4`, HTTP-3 `.5`), con gateway `.1` y DNS como en la sección 2.
 - IP estática del servidor DHCP: `192.168.1.3`, máscara `255.255.255.0`.
 - Pool DHCP (`serverPool`): gateway `192.168.1.1`, sin DNS (`0.0.0.0`), **inicio en `.10`** (los equipos empiezan siempre en la 10).
@@ -184,7 +190,9 @@ El esquema es **el mismo en las dos prácticas** (2 de 2); solo cambia el tamañ
   (`x≈595, 745, 885, 975`).
 - **P1B** (misma forma): servidores `x≈30` (`HTTP y≈430`, `DNS y≈563`), su switch `x≈154, y≈498`; columna de sedes `x≈545` separadas ~250 px
   (`95, 345, 597, 840`); filas de PCs ~70 px por encima y de portátiles ~70 px por debajo; ~125 px entre equipos.
-- **Medidas para construir** (media de las tres prácticas): servidores `x≈30` cada ~130 px; switch de servidores ~150 px a su derecha y centrado
+- **P1A** (misma forma, más separada): servidores `x≈50` (`DNS y≈405`, `HTTP y≈710`), su switch `x≈436, y≈585`; columna de sedes `x≈850`
+  separadas ~315 px (`120, 433, 746, 1067`); PCs ~100 px por encima y portátiles ~80–100 px por debajo; ~100–150 px entre equipos.
+- **Medidas para construir** (referencia sacada de las prácticas 1B, 1C y 2): servidores `x≈30` cada ~130 px; switch de servidores ~150 px a su derecha y centrado
   en vertical; switches de sede ~300 px más a la derecha, cada ~260 px; filas de equipos a ±80 px del switch; primer equipo ~130 px a la derecha
   del switch y ~130 px entre equipos.
 - Con routers o VLAN: **PENDIENTE** (se completará con las siguientes prácticas).
@@ -237,6 +245,11 @@ Cosas de un archivo concreto que no siguen el patrón. No se imitan al construir
 - **P1B: `SW-Jupiter` tenía 3 portátiles** y el enunciado dice 2. Corregido: portátil sobrante borrado y su módulo quitado (puertos justos).
 - **P1B, despistes de configuración** (corregidos): `35` y `36` sin IP; `33` con gateway `.3` y sin DNS; `30` con su propia IP como DNS.
 - **P2: en el switch del servidor las sedes van antes que el servidor** (en P1B y P1C es al revés), y el pool DHCP empezaba en la `.3`.
+
+- **P1A (corregido por el asistente el 2026-10-03):** el servidor `HTTP` no tenía IP (ahora `172.26.1.3`, máscara `255.255.0.0`, gateway `.1`,
+  DNS `.2`); el switch de servidores se llamaba `ServerMadrid` (ahora `SW-ServerMadrid`); tenía un puerto de más (módulo quitado); sus enlaces
+  a las sedes no iban de arriba abajo (ahora Fa2/1→Goya, Fa3/1→SOL, Fa4/1→GranVia, Fa5/1→Moncloa); y los servidores estaban en orden contrario
+  al de sus puertos (ahora `HTTP` arriba y `DNS` abajo).
 
 ## 10. Excepciones y anotaciones del usuario
 Decisiones nuevas (fecha · regla · motivo). El asistente las anota directamente y avisa al usuario.

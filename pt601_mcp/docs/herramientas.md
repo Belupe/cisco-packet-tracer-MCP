@@ -9,6 +9,8 @@ Todas devuelven texto. Un error se devuelve como `isError` con un mensaje en esp
 | `pt_catalog` | — | Modelos disponibles (con marca "verificado en 6.0.1") y tipos de cable |
 | `pt_list_devices` | — | Nombre, modelo, tipo, encendido y nº de puertos |
 | `pt_list_ports` | `device` | Puertos del dispositivo y si están libres o conectados |
+| `pt_remove_link` | `device`, `port` | Quita el cable de ese puerto |
+| `pt_remove_module` | `device`, `slot` | Quita el módulo de una ranura (puerto sobrante de un `Switch-PT-Empty`) |
 | `pt_rename_device` | `name`, `new_name` | Cambia el nombre; falla si el nuevo ya existe |
 | `pt_snapshot` | — | Lee la red entera del archivo abierto: posición (x, y), IP/máscara/DHCP, cables con puertos y tipo, servicios y pool DHCP de los servidores |
 | `pt_describe` | `device`, `process?`, `port?` | Introspección: lista los métodos de un dispositivo, proceso (`DhcpServer`) o puerto |
