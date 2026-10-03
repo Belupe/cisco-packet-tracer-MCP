@@ -155,3 +155,12 @@ Lecciones para el constructor final:
   tener a mano Stop/Start. Cada vez que cambie el código Python hay que recargar el servidor MCP (/mcp) y luego Stop/Start en PT (token nuevo).
 - **Pendiente**: `jsgen.dns_server` sigue con nombres de la API moderna (`DnsServerMain`/`addIpAddress`): probablemente el proceso real sea `DnsServer`;
   comprobar con `pt_describe process=DnsServer` antes de tocarlo. 43 pruebas offline.
+
+
+## 2026-10-03: reglas.md y mejoras pendientes
+- Revisado el GitHub: el commit v0.3 (hecho desde el VS Code del usuario) valida en un PT real `Switch-PT-Empty` con módulos, cables auto con reintento,
+  DHCP de Server-PT (`DhcpServer`) y una red de 3 ciudades con 15 equipos por DHCP. DNS sigue sin validar. 43 pruebas OK.
+- Nuevo `reglas.md` (plantilla con `PENDIENTE`): el usuario define nombres, IPs, VLANs, puertos, servidores, seguridad y layout; manda sobre los defaults.
+  `CLAUDE.md` y `skill/SKILL.md` obligan a leerlo antes de crear nada.
+- `CLAUDE.md` recoge la mejora pedida: representar instrucciones e identificar la posición de los switches (dos lecturas posibles; hay que confirmar con el usuario).
+  Observación del código: `plan.auto_layout` coloca todos los switches en el mismo nivel y no conoce sedes ni jerarquía núcleo/acceso.

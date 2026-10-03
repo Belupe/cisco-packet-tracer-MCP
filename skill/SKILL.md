@@ -26,6 +26,11 @@ No uses nombres de métodos, modelos o puertos de memoria: usa las herramientas 
 
 Referencia completa y esquemas: `pt601_mcp/docs/herramientas.md` y `pt601_mcp/docs/ejemplos.md`.
 
+## Convenciones del usuario (`reglas.md`)
+Antes de crear nada lee **`reglas.md`** (raíz del repositorio): define cómo se nombran los equipos y cómo se reparten IPs, VLANs, puertos y posiciones.
+Manda sobre cualquier valor por defecto. Donde ponga `PENDIENTE`, pregunta una cosa corta al usuario; no inventes. Para redes grandes enseña
+primero el plan (`pt_build_topology` con `dry_run: true`).
+
 ## Reglas
 - **Modelos**: solo los de `pt_catalog`. Los verificados en 6.0.1: `2911`, `2960-24TT`, `PC-PT`, `Switch-PT-Empty`,
   `Router-PT-Empty`, `Server-PT`, `Laptop-PT`, `AccessPoint-PT`. Si usas uno «sin verificar», avisa al usuario.
