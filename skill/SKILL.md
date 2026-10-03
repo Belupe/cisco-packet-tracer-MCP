@@ -18,7 +18,7 @@ No uses nombres de métodos, modelos o puertos de memoria: usa las herramientas 
 5. Resume al usuario qué creaste (nombres, IPs, VLANs) y cualquier paso que diera `ERR`.
 
 ## Herramientas
-- Consulta: `pt_status`, `pt_catalog`, `pt_list_devices`, `pt_list_ports`, `pt_read_output`, `pt_describe`
+- Consulta: `pt_status`, `pt_catalog`, `pt_list_devices`, `pt_list_ports`, `pt_read_output`, `pt_describe`, `pt_snapshot` (red entera: posiciones, IPs, cables, servicios)
 - Construcción: `pt_build_topology`, `pt_add_device`, `pt_connect` (puertos libres automáticos), `pt_add_link`, `pt_move_device`, `pt_remove_device`, `pt_clear_workspace` (exige `confirm`)
 - Configuración: `pt_set_ip`, `pt_router_config`, `pt_switch_config`, `pt_config` (IOS libre), `pt_cli`, `pt_dhcp_server`, `pt_dns_server`
 - Pruebas: `pt_ping`
@@ -30,6 +30,8 @@ Referencia completa y esquemas: `pt601_mcp/docs/herramientas.md` y `pt601_mcp/do
 Antes de crear nada lee **`reglas.md`** (raíz del repositorio): define cómo se nombran los equipos y cómo se reparten IPs, VLANs, puertos y posiciones.
 Manda sobre cualquier valor por defecto. Donde ponga `PENDIENTE`, pregunta una cosa corta al usuario; no inventes. Para redes grandes enseña
 primero el plan (`pt_build_topology` con `dry_run: true`).
+En un Server-PT apaga los servicios que no se usan con `pt_server_services`. Cuando el usuario enseñe un trabajo suyo, léelo con
+`pt_snapshot` y anota en `reglas.md` las costumbres que deduzcas, sin pedir confirmación: solo dile qué has anotado.
 
 ## Reglas
 - **Modelos**: solo los de `pt_catalog`. Los verificados en 6.0.1: `2911`, `2960-24TT`, `PC-PT`, `Switch-PT-Empty`,

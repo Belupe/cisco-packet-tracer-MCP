@@ -1,0 +1,5 @@
+# Trabajos y enunciados de clase del usuario: solo para aprender, no se suben
+ejemplos/
+
+__pycache__/
+*.pyc

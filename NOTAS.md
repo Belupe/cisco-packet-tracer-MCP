@@ -202,3 +202,69 @@ Cautelas: con una sola práctica no se distingue costumbre de coincidencia (hace
 
 **Pendiente** (cuando se aborde): `pt_snapshot`, comparador esperado/obtenido, carpeta de casos (enunciado + trabajo de referencia), sección de «propuestas pendientes
 de confirmar» en `reglas.md`. Si el repositorio es público, quitar datos personales de los trabajos antes de subirlos.
+
+## 2026-10-03: primer trabajo real analizado (Práctica 2, «Ejercicio 4 DHCP») y herramientas nuevas
+- **Dos servidores en el mismo puerto (fallo real):** en Windows `http.server` pone `SO_REUSEADDR`, que deja a DOS procesos escuchar en
+  127.0.0.1:54321. Con dos sesiones de Claude había dos `run.py`: el panel de PT hablaba con el viejo y el nuevo decía «PT no conectado»
+  (sin ningún 401). Arreglo: `bridge.ExclusiveHTTPServer` (`allow_reuse_address = False` + `SO_EXCLUSIVEADDRUSE` en Windows); la segunda
+  instancia ya falla al abrir el puerto y avisa. Prueba: `test_port_is_exclusive`.
+- **Panel:** ante un `HTTP 401` (servidor reiniciado, token nuevo) ahora se recarga solo (`location.reload()`); ya no hace falta Stop/Start
+  cada vez que se reinicia el servidor MCP. (Requiere un Stop/Start la primera vez para cargar el panel nuevo.)
+- **Registro en Claude Code:** `claude mcp add --scope user packet-tracer-601 "--" C:\Python312\python.exe D:\...\pt601_mcp\run.py`.
+  Las herramientas no aparecen en la conversación en curso hasta recargar la ventana/sesión. El usuario SÍ tiene Python instalado (`C:\Python312`).
+- **Servicios de Server-PT (6.0.1 real).** `getProcess(nombre)` devuelve null si no existe. Procesos y miembros comprobados:
+  `DhcpServer` (setEnable/isEnable), `DnsServer` (setEnable/isEnabled, addIpAddress, removeIpAddress), `HttpServer` (setEnable/isEnabled),
+  `HttpsServer` (setHttpsEnable/isHttpsEnabled), `TftpServer`, `FtpServer`, `NtpServer` (**setEnabled**/isEnabled), `SmtpServer`, `Pop3Server`,
+  `SyslogServer` (setEnable/isEnabled), `EmailServer` (solo addUser). Todos los setters reciben un booleano (probados `setEnable(false)`,
+  `setEnabled(false)`, `setHttpsEnable(false)`). No aparece ningún proceso AAA con los nombres probados.
+- **Lectura de un `.pkt`:** dispositivo `getXCoordinate/getYCoordinate`; PC/servidor `getDhcpFlag` (los switches NO lo tienen: TypeError);
+  puerto `getIpAddress/getSubnetMask/isDhcpClientOn/getLink`; enlace `getPort1/getPort2/getConnectionType` (8100/8101) y
+  `puerto.getOwnerDevice().getName()`; pool `getStartIp/getEndIp/getSubnetMask/getDefaultRouter/getDnsServerIp/getDhcpPoolName`.
+  El gateway de un PC no se lee por IPC: `ipconfig` en su consola (`pt_cli`).
+- **Herramientas nuevas:** `pt_snapshot` (red entera: posiciones, IPs, cables con puertos, servicios y pools) y `pt_server_services`
+  (deja encendidos solo los servicios indicados; también `"services": [...]` en `servers[]` del plan). 47 pruebas.
+- **Costumbres aprendidas** (anotadas en `reglas.md`): nombre del equipo = último octeto de su IP; equipos desde la `.10`; gateway `.1`;
+  servidor DHCP `.3` en su propio switch y con solo DHCP encendido; `Switch-PT-Empty` con los puertos justos, `Fa0/1` = uplink;
+  cruzado entre switches y recto a equipos; esquema servidor → su switch → switches de sede → PCs arriba / portátiles abajo.
+  `CopyNN` es el nombre que pone PT al copiar y pegar, no una convención.
+- **Decisión del usuario:** el asistente anota reglas y cambia código sin pedir confirmación; solo informa. `ejemplos/` no se sube (`.gitignore`).
+- **Pendiente:** `plan.auto_layout` con el esquema de clase y numeración desde la `.10`; notas en el mapa (`lw.addNote`, firma sin comprobar);
+  argumentos de `DnsServer.addIpAddress`; comparador esperado/obtenido.
+- **`device.serializeToXml()`** funciona en la 6.0.1 y devuelve TODA la configuración del equipo (7–10 KB): módulos por ranura (`<MODEL>PT-SWITCH-NM-1CFE</MODEL>`),
+  `<IP>`, `<SUBNET>`, `<PORT_GATEWAY>`, `<PORT_DNS>`, `<PORT_DHCP_ENABLE>`, `<GATEWAY>`, `<SYS_NAME>` (hostname), DNS/correo/inalámbrico. Es la forma de
+  leer lo que no tiene getter (gateway y DNS de un PC, módulos instalados). Práctica 2: switches con hostname por defecto `Switch` y sin configuración;
+  equipos finales solo con IP/máscara/gateway (DNS vacío). Enunciados: la jerarquía de puntos está en la negrita del Word (sección 11 de `reglas.md`).
+
+## 2026-10-03: segundo trabajo analizado (Práctica 1C, «Ejercicio 3»: 3 HTTP + DNS, 4 sedes, 172.26.1.0 / 255.255.0.0)
+- **Coincide con la Práctica 2 (2 de 2):** nombre = último octeto; equipos desde la `.10` sin saltos; numeración empezando por la sede de abajo,
+  portátiles antes que PCs y el más bajo a la derecha; `Fa0/1` de cada switch de sede = uplink y luego PCs y portátiles de izquierda a derecha;
+  puertos justos; cruzado entre switches y recto al resto; hostname `Switch` sin tocar; esquema servidores → su switch → columna de sedes → PCs arriba/portátiles abajo.
+- **Nuevo:** máscara por clase (`255.255.0.0` para 172.26.x.x); gateway `.1` también en servidores; DNS (`172.26.1.2`) puesto en todos los equipos y servidores;
+  servidores en columna a la izquierda; nombres `HTTP-1..3` y `DNS`.
+- **Distinto:** en el switch de servidores van primero los servidores y luego las sedes (en la P2 era al revés). Los servicios de los servidores están de fábrica
+  y el DNS apagado y sin registros (`<DNS_SERVER><ENABLED>0`), o sea que esa práctica no configuraba servicios.
+- **Dos Packet Tracer abiertos:** cada ventana de PT es un proceso con su propio motor de scripts. El módulo solo corre donde se pulsó Start; al abrir otro
+  `.pkt` con doble clic se abre OTRO proceso sin módulo y el MCP sigue viendo el archivo antiguo. Comprobar con
+  `Get-Process PacketTracer6 | Select MainWindowTitle`. Abrir con File → Open dentro del mismo PT, o Stop en uno y Start en el otro (nunca dos módulos a la vez).
+- La configuración DNS de un Server-PT se lee en `serializeToXml()` → `<DNS_SERVER><ENABLED>…<NAMESERVER-DATABASE>`; gateway y DNS de un equipo, en `<GATEWAY>` y `<SERVER_IP>`.
+
+## 2026-10-03: tercer trabajo analizado (Práctica 1B, «Ejercicio 2»: HTTP + DNS, 4 sedes, 192.168.1.0)
+- **Confirma (3 de 3):** nombre = último octeto; sede de abajo primero, portátiles antes que PCs, el más bajo a la derecha; `Fa0/1` = uplink;
+  puertos justos; cruzado entre switches; hostname sin tocar; gateway `.1`; mismo esquema del mapa. DNS del servidor puesto en todos los equipos (2 de 2 con DNS).
+- **Regla de servicios aclarada por el usuario:** los servicios de un Server-PT solo se configuran (y se apagan los demás) si el enunciado pide ese
+  servicio; si solo pide la IP, se dejan de fábrica. Al construir, `services` en el plan SOLO cuando el enunciado configure el servicio.
+- **Puertos del switch de servidores:** servidores primero y luego switches (P1B y P1C; la P2 es la excepción).
+- **Excepciones de este archivo** (sección 12 de `reglas.md`): numeración desde la `.20`, switch intermedio `sw-1`, un portátil de más y cuatro despistes de IP/gateway/DNS.
+- Truco práctico: los scripts largos de edición con comillas simples fallan dentro de un heredoc de bash; escribirlos a un `.py` temporal y ejecutarlos.
+
+## 2026-10-03: primera corrección hecha por el asistente en un trabajo real (Práctica 1B) y lo que enseñó de la API
+- Hecho en PT: borrado el portátil sobrante de `SW-Jupiter` y su módulo; 18 equipos renombrados y con IP `.10`–`.27`, máscara, gateway `.1` y DNS `.3`;
+  comprobado sin duplicados y con ping a `HTTP` (192.168.1.2) desde dos equipos. El primer ping tras encender un switch pierde 3 de 4 (STP).
+- **Gateway de un PC/portátil:** `puerto.setDefaultGateway(ip)` solo cambia `<PORT_GATEWAY>`; el que enseña la ventana «IP Configuration» es el del
+  dispositivo, `<GATEWAY>`, que se pone con **`device.setDefaultGateway(ip)`**. `jsgen.set_ip` ponía solo el del puerto: ahora pone los dos.
+- **DNS de la configuración IP:** proceso **`DnsClient`** del equipo: `setServerIp("ip")` / `getServerIp()` (comprobado). Nuevo parámetro `dns` en
+  `pt_set_ip` y en `hosts[]` del plan (`dns_server` en `servers[]`, porque `dns` ahí es el servicio).
+- **Quitar un módulo:** `device.removeModule("<ranura>")` -> true (un solo argumento, con el equipo apagado; comprobado en `Switch-PT-Empty`).
+  Los cables de los demás puertos se conservan tras apagar y encender.
+- La consola de un PC solo admite `ipconfig <IP> <máscara> [<gateway>]`, `/renew` y `/release`: el DNS no se puede poner por consola.
+- Nueva herramienta `pt_rename_device` (comprueba que el nombre nuevo no exista). 49 pruebas.

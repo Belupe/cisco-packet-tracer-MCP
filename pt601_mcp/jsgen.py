@@ -77,7 +77,7 @@ def add_link(d1, p1, d2, p2, code):
         ' return String(lw.createLink(%s, %s, %s, %s, %d));' % (q(d1), q(p1), q(d2), q(p2), int(code)))
 
 
-def set_ip(name, port, ip, mask, gateway, dhcp):
+def set_ip(name, port, ip, mask, gateway, dhcp, dns=None):
     parts = [get_dev("d", name),
              'var p = d.getPort(%s); if (!p) { return "ERROR: no existe el puerto " + %s; }' % (q(port), q(port))]
     if dhcp:
@@ -85,9 +85,25 @@ def set_ip(name, port, ip, mask, gateway, dhcp):
     else:
         parts.append('p.setIpSubnetMask(%s, %s);' % (q(ip), q(mask)))
         if gateway:
+            # 6.0.1 real: el del puerto solo cambia <PORT_GATEWAY>; el que se ve en "IP Configuration" es el del
+            # dispositivo (<GATEWAY>), que tienen PC/portatil/servidor. Se ponen los dos.
             parts.append('p.setDefaultGateway(%s);' % q(gateway))
+            parts.append('if (typeof d.setDefaultGateway == "function") { d.setDefaultGateway(%s); }' % q(gateway))
+        if dns:
+            parts.append('var dc = (typeof d.getProcess == "function") ? d.getProcess("DnsClient") : null;'
+                         ' if (!dc) { return "ERROR: " + %s + " no admite servidor DNS (sin DnsClient)"; }'
+                         ' dc.setServerIp(%s);' % (q(name), q(dns)))
     parts.append('return p.getIpAddress() + " / " + p.getSubnetMask();')
     return wrap(" ".join(parts))
+
+
+def rename_device(name, new_name):
+    return wrap(
+        get_dev("d", name) +
+        ' var ex = null; try { ex = net.getDevice(%s); } catch (e) { ex = null; }'
+        ' if (ex) { return "ERROR: ya existe un dispositivo llamado " + %s; }'
+        ' d.setName(%s); return "OK " + %s + " -> " + d.getName();'
+        % (q(new_name), q(new_name), q(new_name), q(name)))
 
 
 def cli(name, commands, answer_dialog):
@@ -223,7 +239,7 @@ def dhcp_server(name, gateway, dns, start_ip, end_ip, mask):
 
 def dns_server(name, records):
     pairs = "[" + ", ".join("[%s, %s]" % (q(r["name"]), q(r["ip"])) for r in records) + "]"
-    body = (get_dev("d", name) + _PROC_FINDER % ('["DnsServerMain","DNSServerMain","DnsServer"]', "DNS", q(name)) +
+    body = (get_dev("d", name) + _PROC_FINDER % ('["DnsServer","DnsServerMain","DNSServerMain"]', "DNS", q(name)) +
             ' try { if (typeof proc.setEnable == "function") { proc.setEnable(true); log.push("setEnable"); } } catch (e1) { log.push("setEnable fallo"); }'
             ' var recs = %s; var okn = 0; var bad = [];'
             ' for (var i = 0; i < recs.length; i++) { var done = false;' % pairs +
@@ -233,6 +249,59 @@ def dns_server(name, records):
             ' if (bad.length > 0) { return "ERROR: registros no creados: " + bad.join(", ") + ". Miembros del proceso: " + members.join(", "); }'
             ' return "OK " + okn + " registro(s) DNS";')
     return wrap(body)
+
+
+# Servicios de Server-PT en la 6.0.1 real: clave -> (proceso, setter, getter). OJO: el setter cambia de nombre segun
+# el proceso (setEnable / setEnabled / setHttpsEnable); todos reciben un booleano (comprobado en PT real).
+SERVER_SERVICES = (
+    ("dhcp", "DhcpServer", "setEnable", "isEnable"),
+    ("dns", "DnsServer", "setEnable", "isEnabled"),
+    ("http", "HttpServer", "setEnable", "isEnabled"),
+    ("https", "HttpsServer", "setHttpsEnable", "isHttpsEnabled"),
+    ("tftp", "TftpServer", "setEnabled", "isEnabled"),
+    ("ftp", "FtpServer", "setEnabled", "isEnabled"),
+    ("smtp", "SmtpServer", "setEnable", "isEnabled"),
+    ("pop3", "Pop3Server", "setEnable", "isEnabled"),
+    ("ntp", "NtpServer", "setEnabled", "isEnabled"),
+    ("syslog", "SyslogServer", "setEnable", "isEnabled"),
+)
+
+
+def server_services(name, enabled):
+    """Deja encendidos SOLO los servicios de `enabled` (claves de SERVER_SERVICES) y apaga el resto."""
+    rows = ", ".join("[%s, %s, %s, %s, %s]" % (q(k), q(p), q(s), q(g), "true" if k in enabled else "false")
+                     for k, p, s, g in SERVER_SERVICES)
+    return wrap(
+        get_dev("d", name) +
+        ' if (typeof d.getProcess != "function" || !d.getProcess("DhcpServer")) { return "ERROR: " + %s + " no es un Server-PT"; }'
+        ' var sv = [%s]; var on = []; var off = [];'
+        ' for (var i = 0; i < sv.length; i++) { var pr = d.getProcess(sv[i][1]); if (!pr) { continue; }'
+        ' pr[sv[i][2]](sv[i][4]); if (pr[sv[i][3]]()) { on.push(sv[i][0]); } else { off.push(sv[i][0]); } }'
+        ' return "OK encendidos: " + (on.length ? on.join(",") : "ninguno") + " | apagados: " + off.join(",");'
+        % (q(name), rows))
+
+
+def snapshot():
+    """Vuelca la red entera en lineas de texto con tabuladores (para aprender de un .pkt ya hecho):
+    D nombre modelo tipo x y | P puerto ip mascara dhcp cable vecino puerto_vecino | S servicios | L pool DHCP."""
+    services = ", ".join("[%s, %s, %s]" % (q(k), q(p), q(g)) for k, p, _s, g in SERVER_SERVICES)
+    return wrap(
+        'function g(o, m) { return (o && typeof o[m] == "function") ? o[m]() : ""; }'
+        ' var sv = [%s]; var o = [];'
+        ' for (var i = 0; i < net.getDeviceCount(); i++) { var d = net.getDeviceAt(i);'
+        ' o.push(["D", d.getName(), d.getModel(), d.getType(), d.getXCoordinate(), d.getYCoordinate()].join("\\t"));'
+        ' for (var j = 0; j < d.getPortCount(); j++) { var p = d.getPortAt(j); var lk = g(p, "getLink"); var ip = g(p, "getIpAddress");'
+        ' if (!lk && (!ip || ip == "0.0.0.0")) { continue; }'
+        ' var row = ["P", p.getName(), ip, g(p, "getSubnetMask"), g(p, "isDhcpClientOn")];'
+        ' if (lk) { var a = lk.getPort1(); var b = lk.getPort2(); var me = a.getOwnerDevice().getName() == d.getName() && a.getName() == p.getName();'
+        ' var ot = me ? b : a; row.push(lk.getConnectionType(), ot.getOwnerDevice().getName(), ot.getName()); }'
+        ' o.push(row.join("\\t")); }'
+        ' if (d.getType() == 9 && typeof d.getProcess == "function") { var st = [];'
+        ' for (var k = 0; k < sv.length; k++) { var pr = d.getProcess(sv[k][1]); if (pr) { st.push(sv[k][0] + "=" + pr[sv[k][2]]()); } }'
+        ' o.push("S\\t" + st.join(" ")); var dh = d.getProcess("DhcpServer");'
+        ' for (var n = 0; dh && n < dh.getPoolCount(); n++) { var pl = dh.getPoolAt(n);'
+        ' o.push(["L", pl.getDhcpPoolName(), pl.getStartIp(), pl.getEndIp(), pl.getSubnetMask(), pl.getDefaultRouter(), pl.getDnsServerIp()].join("\\t")); } } }'
+        ' return o.join("\\n");' % services)
 
 
 def clear_workspace():

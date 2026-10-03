@@ -56,6 +56,11 @@ function poll() {
     } else if (x.status == 204) {
       lastError = "";
       setTimeout(poll, 250);
+    } else if (x.status == 401) {
+      // El servidor MCP se reinicio (token nuevo): recargar la pagina trae el token actual.
+      lastError = "HTTP 401 (token antiguo, recargando el panel)";
+      show();
+      setTimeout(function () { window.location.reload(); }, 1500);
     } else {
       lastError = "HTTP " + x.status + " (reinicia el panel si cambiaste de servidor)";
       show();

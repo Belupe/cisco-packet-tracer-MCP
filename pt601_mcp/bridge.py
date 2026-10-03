@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -49,7 +50,7 @@ class Bridge:
             pass
 
         Handler.bridge = bridge
-        self._server = ThreadingHTTPServer((self.host, self.port), Handler)
+        self._server = ExclusiveHTTPServer((self.host, self.port), Handler)
         self.port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
@@ -110,6 +111,17 @@ class Bridge:
     def panel_html(self):
         with open(self.panel_path, "r", encoding="utf-8") as f:
             return f.read().replace("__TOKEN__", self.token)
+
+
+class ExclusiveHTTPServer(ThreadingHTTPServer):
+    """En Windows, SO_REUSEADDR deja que DOS procesos escuchen en el mismo puerto: el panel de PT
+    se queda hablando con una instancia vieja y la nueva dice 'PT no conectado'. Puerto en exclusiva."""
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        ThreadingHTTPServer.server_bind(self)
 
 
 class BaseHandler(BaseHTTPRequestHandler):

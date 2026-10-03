@@ -46,6 +46,10 @@ class Tools:
              _obj({"name": S, "model": S, "x": I, "y": I, "ports": I}, ["name", "model"]), self.add_device),
             ("pt_remove_device", "Borra un dispositivo por nombre (todas las copias).",
              _obj({"name": S}, ["name"]), self.remove_device),
+            ("pt_rename_device",
+             "Cambia el nombre de un dispositivo. Falla si el nombre nuevo ya existe (al renumerar varios, hazlo en un "
+             "orden que nunca pise un nombre aun en uso).",
+             _obj({"name": S, "new_name": S}, ["name", "new_name"]), self.rename_device),
             ("pt_move_device", "Mueve un dispositivo a (x, y).",
              _obj({"name": S, "x": I, "y": I}, ["name", "x", "y"]), self.move_device),
             ("pt_add_link",
@@ -54,8 +58,9 @@ class Tools:
              _obj({"device1": S, "port1": S, "device2": S, "port2": S, "cable": S},
                   ["device1", "port1", "device2", "port2"]), self.add_link),
             ("pt_set_ip",
-             "Configura IP en un PC/servidor/laptop (por defecto puerto FastEthernet0). dhcp=true activa cliente DHCP.",
-             _obj({"device": S, "ip": S, "mask": S, "gateway": S, "port": S, "dhcp": B}, ["device"]), self.set_ip),
+             "Configura IP en un PC/servidor/laptop (por defecto puerto FastEthernet0): ip, mask, gateway y dns "
+             "(servidor DNS de la configuracion IP). dhcp=true activa cliente DHCP.",
+             _obj({"device": S, "ip": S, "mask": S, "gateway": S, "dns": S, "port": S, "dhcp": B}, ["device"]), self.set_ip),
             ("pt_cli",
              "Envia comandos a la consola de un router/switch/PC y devuelve la salida nueva. Para routers nuevos "
              "responde solo 'no' al dialogo inicial. Ej.: ['enable','configure terminal','hostname R1'].",
@@ -92,6 +97,15 @@ class Tools:
              "Activa el servicio DNS de un Server-PT y crea registros A. records=[{name, ip}].",
              _obj({"device": S, "records": {"type": "array", "items": {"type": "object"}}}, ["device", "records"]),
              self.dns_server),
+            ("pt_server_services",
+             "Deja encendidos SOLO los servicios indicados de un Server-PT y apaga el resto. "
+             "services: lista de dhcp|dns|http|https|tftp|ftp|smtp|pop3|ntp|syslog (email = smtp+pop3).",
+             _obj({"device": S, "services": {"type": "array", "items": S}}, ["device", "services"]),
+             self.server_services),
+            ("pt_snapshot",
+             "Lee la red ENTERA del archivo abierto: posicion (x,y) de cada equipo, IP/mascara/DHCP, cables con sus "
+             "puertos y tipo, servicios y pool DHCP de los servidores. Para aprender de un trabajo ya hecho o verificar.",
+             _obj({}), self.snapshot),
             ("pt_describe",
              "Introspeccion: lista los metodos de un dispositivo, de uno de sus procesos (process='DhcpServerMain') o de un puerto.",
              _obj({"device": S, "process": S, "port": S}, ["device"]), self.describe),
@@ -206,8 +220,17 @@ class Tools:
         if not dhcp:
             self._req(args, "ip")
             self._req(args, "mask")
+        if args.get("dns"):
+            try:
+                ios.check_ip(args["dns"], "dns")
+            except ios.ConfigError as exc:
+                raise ToolError(str(exc))
         return self._run(jsgen.set_ip(dev, args.get("port") or "FastEthernet0", args.get("ip"),
-                                      args.get("mask"), args.get("gateway"), dhcp))
+                                      args.get("mask"), args.get("gateway"), dhcp, args.get("dns")))
+
+    def rename_device(self, args):
+        new = str(self._req(args, "new_name")).strip()
+        return self._run(jsgen.rename_device(self._req(args, "name"), new))
 
     def cli(self, args):
         commands = args.get("commands")
@@ -313,6 +336,47 @@ class Tools:
             raise ToolError("registro invalido: %s" % exc)
         return self._run(jsgen.dns_server(self._req(args, "device"), clean))
 
+    def server_services(self, args):
+        services = args.get("services")
+        if not isinstance(services, list):
+            raise ToolError("services debe ser una lista (vacia = apagar todos)")
+        known = [k for k, _p, _s, _g in jsgen.SERVER_SERVICES]
+        wanted = set()
+        for s in services:
+            key = str(s).strip().lower()
+            if key == "email":
+                wanted.update(("smtp", "pop3"))
+            elif key in known:
+                wanted.add(key)
+            else:
+                raise ToolError("Servicio desconocido: %s. Validos: %s, email" % (s, ", ".join(known)))
+        return self._run(jsgen.server_services(self._req(args, "device"), wanted))
+
+    def snapshot(self, args):
+        out = self._run(jsgen.snapshot())
+        if not out.strip():
+            return "(sin dispositivos)"
+        cables = {}
+        for cname, code in catalog.CABLES.items():
+            cables.setdefault(str(code), cname)
+        rows = []
+        for line in out.split("\n"):
+            f = line.split("\t")
+            if f[0] == "D":
+                rows.append("%s | %s | tipo %s | x=%s y=%s" % tuple(f[1:6]))
+            elif f[0] == "P":
+                txt = "    %s" % f[1]
+                if f[2] and f[2] != "0.0.0.0":
+                    txt += " ip=%s/%s %s" % (f[2], f[3], "DHCP" if f[4] == "true" else "estatica")
+                if len(f) >= 8:
+                    txt += " --%s--> %s:%s" % (cables.get(f[5], f[5]), f[6], f[7])
+                rows.append(txt)
+            elif f[0] == "S":
+                rows.append("    servicios: %s" % f[1])
+            elif f[0] == "L":
+                rows.append("    pool %s: %s - %s mascara %s router %s dns %s" % tuple(f[1:7]))
+        return _clip("\n".join(rows), 60000)
+
     def describe(self, args):
         return _clip(self._run(jsgen.describe(self._req(args, "device"), args.get("process") or "", args.get("port") or "")))
 
@@ -375,12 +439,13 @@ class Tools:
         for h in plan.get("hosts", []):
             step("IP %s" % h["device"], lambda h=h: self.set_ip(
                 {"device": h["device"], "ip": h.get("ip"), "mask": h.get("mask", "255.255.255.0"),
-                 "gateway": h.get("gateway"), "port": h.get("port"), "dhcp": bool(h.get("dhcp"))}))
+                 "gateway": h.get("gateway"), "dns": h.get("dns"), "port": h.get("port"),
+                 "dhcp": bool(h.get("dhcp"))}))
         for srv in plan.get("servers", []):
             if srv.get("ip"):
                 step("IP servidor %s" % srv["device"], lambda srv=srv: self.set_ip(
                     {"device": srv["device"], "ip": srv["ip"], "mask": srv.get("mask", "255.255.255.0"),
-                     "gateway": srv.get("gateway"), "port": srv.get("port")}))
+                     "gateway": srv.get("gateway"), "dns": srv.get("dns_server"), "port": srv.get("port")}))
             if isinstance(srv.get("dhcp"), dict):
                 dh = srv["dhcp"]
                 step("DHCP en %s" % srv["device"], lambda srv=srv, dh=dh: self.dhcp_server(
@@ -390,6 +455,9 @@ class Tools:
             if isinstance(srv.get("dns"), dict) and srv["dns"].get("records"):
                 step("DNS en %s" % srv["device"], lambda srv=srv: self.dns_server(
                     {"device": srv["device"], "records": srv["dns"]["records"]}))
+            if isinstance(srv.get("services"), list):
+                step("servicios de %s" % srv["device"], lambda srv=srv: self.server_services(
+                    {"device": srv["device"], "services": srv["services"]}))
         # En la 6.0.1 activar el cliente DHCP no pide la IP si el servidor aun no existia o no habia cable:
         # una vez cableado y con el pool listo, se fuerza con ipconfig /renew (comprobado en PT real).
         if any(isinstance(s.get("dhcp"), dict) for s in plan.get("servers", [])):

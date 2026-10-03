@@ -8,7 +8,7 @@ Lee `GUIA_COMPLETA.md` (arquitectura y mapa de confianza) y `NOTAS.md` (diario t
 cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valores por defecto. Donde ponga `PENDIENTE`, pregunta; no inventes.
 
 ## Estructura
-- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (23 herramientas),
+- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (26 herramientas),
   `jsgen.py` (JavaScript para PT), `ios.py` (comandos IOS), `plan.py` (planes JSON), `catalog.py` (modelos/cables),
   `extension/` (panel + script engine que se pegan/cargan en PT).
 - `tests/` — pruebas sin PT: `python3 -m unittest discover -s tests -v` (o con el python portátil del usuario).
@@ -26,7 +26,16 @@ cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valo
 5. Estilo: Python 3.8+ (el python portátil del usuario es 3.12), sin dependencias externas, mensajes de error en español.
 6. Commits en `main`, mensajes descriptivos. Actualiza `NOTAS.md` con cada hallazgo nuevo.
 7. **Convenciones del usuario**: nombres, IPs, VLANs, puertos y layout salen de `reglas.md`. Si una petición lo contradice, avisa antes de
-   construir. Si falta una regla, pregunta y propón anotarla en la sección 10 de `reglas.md` (solo con permiso del usuario).
+   construir. Si falta una regla que hace falta para construir, pregunta.
+8. **Aprender de los trabajos del usuario sin pedir permiso** (decisión suya, 2026-10-03): abre el `.pkt` con `pt_snapshot`, compara con el
+   enunciado y **anota directamente** en `reglas.md` lo que deduzcas (y cambia el código que haga falta, con su prueba). Después dile qué has
+   anotado; él corrige la redacción si quiere. No le pidas «¿confirmas?».
+   **Forma de trabajo acordada:** al principio el usuario hace la práctica él mismo en PT, con el Word del enunciado delante, y el asistente
+   va mirando (`pt_snapshot` al empezar y cada vez que avise o termine un paso) para anotar los **patrones que se repiten**, no para copiar
+   el ejercicio. Con el tiempo irá delegando prácticas enteras.
+9. `ejemplos/` contiene enunciados y trabajos de clase: está en `.gitignore`, **no se sube** y se borra al terminar.
+10. Si `pt_status` dice «PT no conectado» pero el usuario ve el panel conectado, busca otra instancia de `run.py` (otra sesión de Claude)
+    con `Get-CimInstance Win32_Process -Filter "Name='python.exe'"` y ciérrala.
 
 ## Particularidades de la 6.0.1 (comprobadas en la máquina del usuario)
 - `lw.addDevice(tipo, modelo)` — **2 argumentos**; posición con `device.moveToLocation(x, y)`.
@@ -37,8 +46,9 @@ cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valo
 - Un error IPC aborta el script si la ventana Debug está abierta.
 
 ## Lo primero que probablemente haya que reparar (sin validar en PT real)
-1. **Servidor DNS de Server-PT** (`jsgen.dns_server`): basado en la API moderna (`DnsServerMain`, `addIpAddress`); el real
-   probablemente sea `DnsServer`. Usa `pt_describe` con `process=DnsServer`. (El DHCP ya está validado: proceso `DhcpServer`, pool por defecto.)
+1. **Servidor DNS de Server-PT** (`jsgen.dns_server`): el proceso real es `DnsServer` y tiene `addIpAddress`/`removeIpAddress`/`setEnable`
+   (comprobado 2026-10-03), pero **los argumentos de `addIpAddress` siguen sin probar**: pruébalo con una sola llamada y Debug cerrada.
+   (El DHCP ya está validado: proceso `DhcpServer`, pool por defecto.)
 2. **Puertos automáticos** (`jsgen.connect_auto`) y el parseo de `OK X:p <-> Y:q` en `tools.build_topology` (`@VECINO`).
 3. **Panel con token** (`extension/interface.html`): probado solo con un panel simulado.
 4. Modelos del catálogo marcados «sin verificar» (`catalog.py`).
@@ -48,13 +58,17 @@ Petición: *mejorar el aprendizaje de representar instrucciones e identificar la
 
 **A. Interpretar documentos con instrucciones** (enunciados de clase, guiones de práctica). Antes de construir nada:
 1. Extraer del documento una **lista de requisitos** (equipos, cantidades, IPs, VLANs, servicios, pruebas pedidas) y enseñársela al usuario.
+   **Conserva la jerarquía de puntos y subpuntos** (en los Word de clase está en la negrita/sangría, no en el nivel de lista): ver sección 11
+   de `reglas.md`, que explica cómo se traduce ese esquema a la topología (servidor → `SW-Servidor…` → switches de sede).
 2. Marcar lo que el documento **no dice** o dice de forma ambigua y **preguntar**; no rellenar huecos con suposiciones.
 3. Completar nombres, IPs y puertos con `reglas.md`; si el documento y `reglas.md` chocan, avisar y que decida el usuario.
 4. Traducirlo a un plan (`pt_build_topology`, primero `dry_run: true`) y enseñarlo.
 5. Al terminar, **verificar contra la lista de requisitos** (`pt_list_devices`, `pt_list_ports`, `pt_cli`, `pt_ping`) e informar de lo que no se cumple.
 
 **B. Posición de los switches y del resto de equipos: seguir el esquema exacto de organización que se usa en clase.**
-- El esquema lo define el usuario en la sección 7 de `reglas.md` (aún por rellenar). **No inventes una disposición propia**: si falta, pregunta.
+- El esquema está en la sección 7 de `reglas.md` (rellenado con la Práctica 2; faltan routers/VLAN). **No inventes una disposición propia**: si falta, pregunta.
+- Siguiente mejora de código: que `plan.auto_layout` genere ese esquema (servidor → su switch → switches de sede → filas de PCs/portátiles),
+  que el plan numere los equipos desde la `.10` y que ponga la nota con la IP del servidor (`lw.addNote`, firma sin comprobar).
 - Observación del código: `plan.auto_layout` es genérico (por niveles) y coloca **todos** los switches en el mismo nivel (`TIER_BY_KIND`: switch = 1),
   sin jerarquía núcleo/acceso ni sedes. Habrá que hacerlo configurable o sustituirlo por posiciones que sigan el esquema de clase
   (por ejemplo, posiciones explícitas por rol y sede). Hasta entonces, pasa `x`/`y` explícitos en el plan según `reglas.md`.

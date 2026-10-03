@@ -98,6 +98,18 @@ class BridgeTests(unittest.TestCase):
         finally:
             panel.stop = True
 
+    def test_panel_reloads_itself_on_401(self):
+        # Si el servidor se reinicia, el panel debe recargarse solo para recibir el token nuevo.
+        html = self.bridge.panel_html()
+        i = html.index("x.status == 401")
+        self.assertIn("location.reload()", html[i:i + 400])
+
+    def test_port_is_exclusive(self):
+        # En Windows dos instancias podian escuchar en el mismo puerto y PT hablaba con la vieja.
+        other = Bridge(port=self.bridge.port)
+        with self.assertRaises(OSError):
+            other.start()
+
     def test_run_js_before_any_connection_fails_fast(self):
         with self.assertRaises(BridgeError):
             self.bridge.run_js("1")
@@ -202,6 +214,66 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn('R1"); ipc', js)
         self.assertIn(json.dumps(evil), js)
         self.assertIn("\\u00f1", jsgen.q("ñ"))
+
+    def test_set_ip_sets_device_gateway_and_dns_client(self):
+        # 6.0.1 real: p.setDefaultGateway solo cambia PORT_GATEWAY; el visible es d.setDefaultGateway.
+        # El DNS de la configuracion IP es el proceso DnsClient (setServerIp).
+        fb = FakeBridge(["192.168.1.10 / 255.255.255.0"])
+        Tools(fb).call("pt_set_ip", {"device": "10", "ip": "192.168.1.10", "mask": "255.255.255.0",
+                                     "gateway": "192.168.1.1", "dns": "192.168.1.3"})
+        js = fb.sent[0]
+        self.assertIn('p.setDefaultGateway("192.168.1.1")', js)
+        self.assertIn('d.setDefaultGateway("192.168.1.1")', js)
+        self.assertIn('d.getProcess("DnsClient")', js)
+        self.assertIn('dc.setServerIp("192.168.1.3")', js)
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge([])).call("pt_set_ip", {"device": "10", "ip": "192.168.1.10", "mask": "255.255.255.0",
+                                                     "dns": "no-es-ip"})
+
+    def test_rename_checks_duplicates_first(self):
+        fb = FakeBridge(["OK 20 -> 10"])
+        self.assertIn("OK", Tools(fb).call("pt_rename_device", {"name": "20", "new_name": "10"}))
+        js = fb.sent[0]
+        self.assertLess(js.index('ya existe un dispositivo llamado'), js.index('d.setName("10")'))
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge(["ERROR: ya existe un dispositivo llamado 10"])).call(
+                "pt_rename_device", {"name": "20", "new_name": "10"})
+
+    def test_server_services_uses_real_setter_names(self):
+        # 6.0.1 real: el setter cambia segun el proceso (setEnable / setEnabled / setHttpsEnable).
+        fb = FakeBridge(["OK encendidos: dhcp | apagados: dns,http"])
+        Tools(fb).call("pt_server_services", {"device": "Server DHCP", "services": ["DHCP"]})
+        js = fb.sent[0]
+        self.assertIn('["dhcp", "DhcpServer", "setEnable", "isEnable", true]', js)
+        self.assertIn('["tftp", "TftpServer", "setEnabled", "isEnabled", false]', js)
+        self.assertIn('["https", "HttpsServer", "setHttpsEnable", "isHttpsEnabled", false]', js)
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge([])).call("pt_server_services", {"device": "S", "services": ["telnet"]})
+        fb2 = FakeBridge(["OK"])
+        Tools(fb2).call("pt_server_services", {"device": "S", "services": ["email"]})
+        self.assertIn('["smtp", "SmtpServer", "setEnable", "isEnabled", true]', fb2.sent[0])
+
+    def test_snapshot_formats_positions_ips_links_and_services(self):
+        raw = "\n".join([
+            "D\tServer DHCP\tServer-PT\t9\t65\t357",
+            "P\tFastEthernet0\t192.168.1.3\t255.255.255.0\tfalse\t8100\tSW-ServidorDHCP\tFastEthernet2/1",
+            "S\tdhcp=true dns=false",
+            "L\tserverPool\t192.168.1.3\t192.168.1.255\t255.255.255.0\t192.168.1.1\t0.0.0.0",
+            "D\tSW-Madrid\tSwitch-PT-Empty\t1\t388\t166",
+            "P\tFastEthernet0/1\t\t\t\t8101\tSW-ServidorDHCP\tFastEthernet0/1",
+            "D\tCopy10\tLaptop-PT\t17\t1313\t558",
+            "P\tFastEthernet0\t192.168.1.5\t255.255.255.0\ttrue\t8100\tCopySW-Cadiz\tFastEthernet4/1"] * 40)
+        fb = FakeBridge([raw])
+        out = Tools(fb).call("pt_snapshot", {})
+        self.assertIn("Server DHCP | Server-PT | tipo 9 | x=65 y=357", out)
+        self.assertIn("FastEthernet0 ip=192.168.1.3/255.255.255.0 estatica --straight--> SW-ServidorDHCP:FastEthernet2/1", out)
+        self.assertIn("FastEthernet0/1 --cross--> SW-ServidorDHCP:FastEthernet0/1", out)
+        self.assertIn("ip=192.168.1.5/255.255.255.0 DHCP", out)
+        self.assertIn("servicios: dhcp=true dns=false", out)
+        self.assertIn("pool serverPool: 192.168.1.3 - 192.168.1.255", out)
+        self.assertNotIn("recortado", out)          # una red de clase entera no debe recortarse
+        for bad in ("let ", "const ", "=>", "JSON."):
+            self.assertNotIn(bad, fb.sent[0])
 
     def test_list_devices_formats_rows(self):
         out = Tools(FakeBridge(["R1\t2911\t0\ttrue\t3\nS1\t2960-24TT\t1\ttrue\t26"])).call("pt_list_devices", {})

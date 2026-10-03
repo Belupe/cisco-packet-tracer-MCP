@@ -9,6 +9,8 @@ Todas devuelven texto. Un error se devuelve como `isError` con un mensaje en esp
 | `pt_catalog` | — | Modelos disponibles (con marca "verificado en 6.0.1") y tipos de cable |
 | `pt_list_devices` | — | Nombre, modelo, tipo, encendido y nº de puertos |
 | `pt_list_ports` | `device` | Puertos del dispositivo y si están libres o conectados |
+| `pt_rename_device` | `name`, `new_name` | Cambia el nombre; falla si el nuevo ya existe |
+| `pt_snapshot` | — | Lee la red entera del archivo abierto: posición (x, y), IP/máscara/DHCP, cables con puertos y tipo, servicios y pool DHCP de los servidores |
 | `pt_describe` | `device`, `process?`, `port?` | Introspección: lista los métodos de un dispositivo, proceso (`DhcpServer`) o puerto |
 | `pt_read_output` | `device`, `tail_chars?` | Final de la consola |
 
@@ -36,6 +38,7 @@ Para `serial`/`console` hay que indicar los puertos.
 | `pt_switch_config` | `device`, `spec`, `save?` | Ver esquema abajo |
 | `pt_dhcp_server` | `device`, `start_ip`, `mask`, `pool?`, `gateway?`, `dns?`, `max_users?`, `tftp?` | Servicio DHCP de un Server-PT |
 | `pt_dns_server` | `device`, `records[{name, ip}]` | Servicio DNS de un Server-PT |
+| `pt_server_services` | `device`, `services[]` | Deja encendidos SOLO esos servicios (`dhcp`, `dns`, `http`, `https`, `tftp`, `ftp`, `smtp`, `pop3`, `ntp`, `syslog`, `email`) y apaga el resto. En planes: `"services": ["dhcp"]` dentro de `servers[]` |
 
 ### `spec` de `pt_router_config`
 ```json
