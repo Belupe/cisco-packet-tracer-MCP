@@ -43,25 +43,22 @@ cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valo
 3. **Panel con token** (`extension/interface.html`): probado solo con un panel simulado.
 4. Modelos del catálogo marcados «sin verificar» (`catalog.py`).
 
-## Mejoras pendientes pedidas por el usuario (2026-10-03)
-Petición literal: *«Necesitamos mejorar el aprendizaje de representar instrucciones e identificar la posición de los switches.»*
-La frase admite varias lecturas: **confirma con el usuario cuál quiere antes de implementar** (una pregunta corta, con estas opciones).
+## Mejoras pendientes pedidas por el usuario (actualizado 2026-10-03)
+Petición: *mejorar el aprendizaje de representar instrucciones e identificar la posición de los switches.* Aclarado por el usuario:
 
-**A. Representar instrucciones** — cómo se traduce una petición en lenguaje natural a un plan (`pt_build_topology`) o a llamadas sueltas.
-- Aplicar siempre `reglas.md` (nombres, IPs, VLANs, puertos); preguntar lo que falte en lugar de suponer.
-- Para redes grandes o ambiguas: enseñar primero el plan con `dry_run: true` (nombres, IPs, enlaces) y construir tras el visto bueno.
-- Capturar los patrones que el usuario corrija (p. ej. «los switches de acceso cuelgan del switch de núcleo») como reglas en `reglas.md`
-  (con permiso) o como hallazgos en `NOTAS.md`, para no repetir el error.
-- Añadir tests con peticiones tipo (switch + PCs + portátiles + DHCP/DNS; varias sedes) que comprueben el plan resultante.
+**A. Interpretar documentos con instrucciones** (enunciados de clase, guiones de práctica). Antes de construir nada:
+1. Extraer del documento una **lista de requisitos** (equipos, cantidades, IPs, VLANs, servicios, pruebas pedidas) y enseñársela al usuario.
+2. Marcar lo que el documento **no dice** o dice de forma ambigua y **preguntar**; no rellenar huecos con suposiciones.
+3. Completar nombres, IPs y puertos con `reglas.md`; si el documento y `reglas.md` chocan, avisar y que decida el usuario.
+4. Traducirlo a un plan (`pt_build_topology`, primero `dry_run: true`) y enseñarlo.
+5. Al terminar, **verificar contra la lista de requisitos** (`pt_list_devices`, `pt_list_ports`, `pt_cli`, `pt_ping`) e informar de lo que no se cumple.
 
-**B. Identificar la posición de los switches** — dos lecturas posibles:
-1. *Posición en el mapa (layout).* Hoy `plan.auto_layout` pone **todos** los switches en el mismo nivel (`TIER_BY_KIND`: switch = 1) y los
-   equipos finales en el nivel 3, y no conoce las sedes. Por eso una jerarquía núcleo → acceso, o varias ciudades, se dibuja plana o
-   solapada. Mejoras posibles: niveles a partir del grafo de enlaces (profundidad desde routers/nubes), colgar cada switch de acceso bajo su
-   switch padre y sus equipos bajo él, agrupar por sede (`site` en el plan) y respetar la sección 7 de `reglas.md`.
-2. *Posición/rol dentro de la topología y lectura real.* Reconocer qué switch es núcleo, distribución o acceso, qué puertos son uplink o de
-   acceso, y poder **leer dónde están ahora** los switches en el workspace. El dispositivo ya expone `getXCoordinate`/`getYCoordinate`
-   (aparecen en el sondeo 1): `pt_list_devices` podría devolver x e y y `pt_move_device` recolocar sin duplicar.
+**B. Posición de los switches y del resto de equipos: seguir el esquema exacto de organización que se usa en clase.**
+- El esquema lo define el usuario en la sección 7 de `reglas.md` (aún por rellenar). **No inventes una disposición propia**: si falta, pregunta.
+- Observación del código: `plan.auto_layout` es genérico (por niveles) y coloca **todos** los switches en el mismo nivel (`TIER_BY_KIND`: switch = 1),
+  sin jerarquía núcleo/acceso ni sedes. Habrá que hacerlo configurable o sustituirlo por posiciones que sigan el esquema de clase
+  (por ejemplo, posiciones explícitas por rol y sede). Hasta entonces, pasa `x`/`y` explícitos en el plan según `reglas.md`.
+- El dispositivo ya expone `getXCoordinate`/`getYCoordinate` (sondeo 1): se pueden leer las posiciones reales y recolocar con `pt_move_device`.
 
 **C. Datos útiles ya conocidos:** `Switch-PT-Empty` nace sin puertos (se le añaden módulos, ver `NOTAS.md`); el cable `auto` falla en puertos de
 módulo y se reintenta recto/cruzado; con la ventana Debug abierta un error IPC cuelga el motor (Stop/Start).

@@ -164,3 +164,8 @@ Lecciones para el constructor final:
   `CLAUDE.md` y `skill/SKILL.md` obligan a leerlo antes de crear nada.
 - `CLAUDE.md` recoge la mejora pedida: representar instrucciones e identificar la posición de los switches (dos lecturas posibles; hay que confirmar con el usuario).
   Observación del código: `plan.auto_layout` coloca todos los switches en el mismo nivel y no conoce sedes ni jerarquía núcleo/acceso.
+
+## 2026-10-03 (aclaración del usuario)
+- Posición de los equipos: en clase se usa un **esquema exacto de organización**; el mapa debe seguirlo (sección 7 de `reglas.md`, pendiente de rellenar).
+  `plan.auto_layout` es genérico y no lo cumple; habrá que hacerlo configurable o usar posiciones explícitas.
+- Interpretación de documentos con instrucciones (enunciados): lista de requisitos → preguntar huecos → aplicar `reglas.md` → plan con `dry_run` → verificar al final (ver `CLAUDE.md`).

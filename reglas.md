@@ -87,11 +87,30 @@ Reglas de formato:
 - Banner (`banner motd`): **PENDIENTE**
 - Guardar la configuración (`write memory`) al terminar: **PENDIENTE**
 
-## 7. Posición en el mapa (layout)
-- Qué va arriba / abajo (routers, switches, servidores, equipos finales): **PENDIENTE**
-- Separación entre equipos (por defecto el MCP usa 130 px en horizontal y 150 px en vertical): **PENDIENTE**
-- Cómo se agrupan varias sedes en el mapa: **PENDIENTE**
-- Posición de los switches respecto a sus equipos y al router (núcleo / distribución / acceso): **PENDIENTE**
+## 7. Posición en el mapa (layout): esquema exacto de clase
+> El mapa **debe seguir el esquema de organización que se usa en clase**, tal cual. El asistente no puede improvisar otra disposición:
+> si algo no está descrito aquí, pregunta antes de construir y pasa `x`/`y` explícitos en el plan.
+
+Descripción del esquema (texto o dibujo ASCII): **PENDIENTE**
+
+```
+PENDIENTE — dibuja aquí el esquema de clase, por ejemplo:
+
+        [ router ]
+            |
+        [ switch ]
+         /  |  \
+      [PC][PC][PC]
+```
+
+- Imagen o apuntes del esquema (ruta dentro del repositorio, p. ej. `documentación/esquemas/clase.png`): **PENDIENTE**
+- Qué va arriba / abajo / a los lados (routers, switches, servidores, equipos finales): **PENDIENTE**
+- Orden de los equipos de izquierda a derecha (por nombre, por sede, por VLAN…): **PENDIENTE**
+- Posición de cada tipo de switch (núcleo / distribución / acceso) y de qué cuelga cada uno: **PENDIENTE**
+- Coordenadas de referencia (x, y) de cada nivel o fila: **PENDIENTE**
+- Separación entre equipos (el MCP usa por defecto 130 px en horizontal y 150 px en vertical): **PENDIENTE**
+- Cómo se agrupan varias sedes o ciudades en el mapa: **PENDIENTE**
+- Enlaces y puertos que deben verse de una forma concreta (por ejemplo, uplinks en un lado): **PENDIENTE**
 
 ## 8. Notas y documentación en el mapa
 - Añadir notas con IPs / VLANs al mapa: **PENDIENTE**
