@@ -99,6 +99,22 @@ def router_config(spec):
         for net in rip.get("networks", []):
             lines.append("network %s" % check_ip(net, "red RIP"))
         lines.append("exit")
+    for acl in spec.get("acls", []):
+        number = int(acl["number"])
+        if not (1 <= number <= 199):
+            raise ConfigError("ACL %d: numero fuera de rango (1-99 estandar, 100-199 extendida)" % number)
+        rules = [str(r).strip() for r in acl.get("rules", []) if str(r).strip()]
+        if not rules:
+            raise ConfigError("ACL %d sin reglas" % number)
+        for rule in rules:
+            if rule.split()[0] not in ("permit", "deny", "remark"):
+                raise ConfigError("ACL %d: la regla debe empezar por permit, deny o remark: %r" % (number, rule))
+            lines.append("access-list %d %s" % (number, rule))
+        for ap in acl.get("apply", []):
+            direction = str(ap.get("direction", "in")).lower()
+            if direction not in ("in", "out"):
+                raise ConfigError("ACL %d: direction debe ser in u out" % number)
+            lines += ["interface %s" % ap["port"], "ip access-group %d %s" % (number, direction), "exit"]
     for pool in spec.get("dhcp_pools", []):
         for ex in pool.get("excluded", []):
             start = check_ip(ex["start"], "excluida")

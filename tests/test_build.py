@@ -114,6 +114,119 @@ class ClassPlanTests(unittest.TestCase):
             Tools(ScriptBridge()).call("pt_class_plan", {"spec": {"servers": []}})
 
 
+class AclTests(unittest.TestCase):
+    def test_acl_lines_and_validation(self):
+        cmds = ios.router_config({"acls": [{"number": 110,
+                                            "rules": ["deny icmp 192.168.41.0 0.0.0.255 192.168.50.0 0.0.0.63", "permit ip any any"],
+                                            "apply": [{"port": "FastEthernet0/0", "direction": "in"}]}]})
+        text = "\n".join(cmds)
+        self.assertIn("access-list 110 deny icmp 192.168.41.0 0.0.0.255 192.168.50.0 0.0.0.63", text)
+        self.assertLess(text.index("access-list 110 permit ip any any"), text.index("ip access-group 110 in"))
+        self.assertIn("interface FastEthernet0/0", text)
+        for bad in ({"number": 500, "rules": ["permit ip any any"]}, {"number": 10, "rules": []},
+                    {"number": 10, "rules": ["allow any"]},
+                    {"number": 10, "rules": ["permit any"], "apply": [{"port": "Fa0/0", "direction": "both"}]}):
+            with self.assertRaises(ios.ConfigError):
+                ios.router_config({"acls": [bad]})
+
+
+class RoutedPlanTests(unittest.TestCase):
+    SPEC = {"lan_block": "192.168.50.0", "prefix": 26, "transit": "10.0.0.0", "routing": "ospf", "origin": [1500, 100],
+            "sites": [{"name": "Servidores", "servers": [{"name": "DNS"}, {"name": "HTTP"}]},
+                      {"name": "Madrid", "pcs": 2, "laptops": 1, "dhcp": True},
+                      {"name": "Cadiz", "pcs": 1, "laptops": 1, "dhcp": True}]}
+
+    def setUp(self):
+        self.plan = planmod.routed_plan(self.SPEC)
+        self.dev = {d["name"]: d for d in self.plan["devices"]}
+        self.rt = {r["device"]: r for r in self.plan["routers"]}
+
+    def test_subnets_gateways_and_names(self):
+        self.assertEqual(planmod.validate_plan(self.plan), [])
+        r = self.rt["R-Madrid"]
+        self.assertEqual(r["interfaces"], [{"port": "FastEthernet0/0", "ip": "10.0.0.2", "mask": "255.255.255.0"},
+                                           {"port": "FastEthernet1/0", "ip": "192.168.50.65", "mask": "255.255.255.192"}])
+        self.assertEqual(r["dhcp_pools"][0]["excluded"], [{"start": "192.168.50.65", "end": "192.168.50.73"}])
+        self.assertEqual(r["dhcp_pools"][0]["dns"], ["192.168.50.2"])
+        self.assertTrue(r["save"])
+        # equipos desde la +10 de cada subred; el nombre es el ultimo octeto y no se repite entre subredes
+        self.assertEqual([h["device"] for h in self.plan["hosts"]], ["74", "75", "76", "138", "139"])
+        self.assertEqual(self.plan["hosts"][0], {"device": "74", "dhcp": True, "expect_ip": "192.168.50.74"})
+        self.assertEqual(self.dev["74"]["model"], "Laptop-PT")          # portatiles primero
+        srv = {s["device"]: s for s in self.plan["servers"]}
+        self.assertEqual(srv["DNS"]["ip"], "192.168.50.2")
+        self.assertEqual(srv["HTTP"], {"device": "HTTP", "ip": "192.168.50.3", "mask": "255.255.255.192",
+                                       "gateway": "192.168.50.1", "dns_server": "192.168.50.2"})
+
+    def test_models_ports_and_cables(self):
+        self.assertEqual(self.dev["R-Madrid"]["model"], "Router-PT-Empty")
+        self.assertEqual(self.dev["R-Madrid"]["ports"], 2)
+        self.assertEqual(self.dev["SW-Core"]["ports"], 3)
+        self.assertEqual(self.dev["SW-Madrid"]["ports"], 4)
+        self.assertTrue(all(l["cable"] == "straight" for l in self.plan["links"]))
+        self.assertIn({"a": "SW-Core", "port_a": "FastEthernet1/1", "b": "R-Madrid", "port_b": "FastEthernet0/0",
+                       "cable": "straight"}, self.plan["links"])
+        self.assertIn({"network": "10.0.0.0", "mask": "255.255.255.0", "area": 0}, self.rt["R-Cadiz"]["ospf"]["networks"])
+
+    def test_static_routing_and_whole_24_per_site(self):
+        spec = dict(self.SPEC, routing="static", prefix=24)
+        plan = planmod.routed_plan(spec)
+        rt = {r["device"]: r for r in plan["routers"]}
+        self.assertIn({"network": "192.168.50.0", "mask": "255.255.255.0", "next_hop": "10.0.0.1"},
+                      rt["R-Madrid"]["static_routes"])
+        self.assertEqual(rt["R-Madrid"]["interfaces"][1]["ip"], "192.168.51.1")
+        self.assertIn("Madrid-10", [h["device"] for h in plan["hosts"]])   # con /24 por sede el octeto se repite
+        self.assertEqual(planmod.validate_plan(plan), [])
+        with self.assertRaises(planmod.PlanError):
+            planmod.routed_plan({"prefix": 26, "sites": [{"name": str(i)} for i in range(5)]})
+
+    def test_build_aborts_before_creating_if_a_name_already_exists(self):
+        # Caso real: "10", "74"... ya existian en el .pkt y los pasos de DHCP actuaron sobre los equipos antiguos.
+        class Busy(ScriptBridge):
+            def run_js(self, code, timeout=25.0):
+                if "getDeviceAt(i)" in code and "addDevice" not in code:
+                    self.sent.append(code)
+                    return "74\tLaptop-PT\t17\ttrue\t1\nRouter0\tRouter-PT-Empty\t0\ttrue\t2"
+                return ScriptBridge.run_js(self, code, timeout)
+        bridge = Busy()
+        with self.assertRaises(ToolError) as ctx:
+            Tools(bridge).call("pt_routed_plan", {"spec": self.SPEC, "build": True})
+        self.assertIn("74", str(ctx.exception))
+        self.assertFalse(any("lw.addDevice(" in c for c in bridge.sent))     # no se llego a crear nada
+        plan = planmod.routed_plan(dict(self.SPEC, host_names="site"))
+        self.assertIn("Madrid-74", [h["device"] for h in plan["hosts"]])
+
+    def test_dhcp_timeout_turns_client_off_so_it_cannot_steal_the_next_ip(self):
+        # Caso real: Norte-10 tardo mas de 25 s (el puerto del switch aun no reenviaba), siguio pidiendo y
+        # Norte-11 se llevo la .10. Ahora se espera mas (75 s) y, si aun asi falla, se le quita el DHCP.
+        import inspect
+        import pt601_mcp.tools as tools_mod
+        self.assertEqual(inspect.signature(Tools._dhcp_in_order).parameters["wait"].default, 75)
+
+        class NoLease(ScriptBridge):
+            def run_js(self, code, timeout=25.0):
+                self.sent.append(code)
+                return "0.0.0.0" if "getIpAddress()) : " in code else "OK"
+        bridge = NoLease()
+        real_sleep, tools_mod.time.sleep = tools_mod.time.sleep, lambda s: None
+        try:
+            with self.assertRaises(ToolError):
+                Tools(bridge)._dhcp_in_order("Norte-10", "FastEthernet0", wait=0)
+        finally:
+            tools_mod.time.sleep = real_sleep
+        self.assertIn("setDhcpClientFlag(false)", bridge.sent[-1])
+
+    def test_build_defers_dhcp_until_routers_are_configured(self):
+        bridge = ScriptBridge()
+        report = Tools(bridge).call("pt_routed_plan", {"spec": self.SPEC, "build": True})
+        self.assertIn("0 con error", report)
+        labels = [l[4:].split(":")[0] for l in report.splitlines() if l.startswith(("OK ", "ERR"))]
+        first_dhcp = labels.index("DHCP 74")
+        self.assertGreater(first_dhcp, labels.index("config router R-Cadiz"))
+        self.assertNotIn("IP 74", labels)
+        self.assertTrue(any("write memory" in c for c in bridge.sent))    # un reinicio no debe perder la configuracion
+
+
 USER_SCENARIO = {
     "devices": [
         {"name": "SW1", "model": "2960-24TT"},

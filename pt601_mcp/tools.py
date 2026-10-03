@@ -37,6 +37,9 @@ class Tools:
         self.registry = [
             ("pt_status", "Estado del puente y de Packet Tracer (version, numero de dispositivos).",
              _obj({}), self.status),
+            ("pt_realtime",
+             "Pone Packet Tracer en modo Tiempo real (si esta en Simulacion nada avanza: ping, DHCP, STP, OSPF/RIP).",
+             _obj({}), self.realtime),
             ("pt_catalog", "Modelos de dispositivo y tipos de cable disponibles en PT 6.0.1.",
              _obj({}), self.catalog),
             ("pt_list_devices", "Lista los dispositivos del workspace (nombre, modelo, tipo, encendido, puertos).",
@@ -142,6 +145,15 @@ class Tools:
              "Pone nombres por ultimo octeto desde la .10, puertos justos, cables, posiciones del esquema, gateway .1 y DNS. "
              "Sin build devuelve el plan para revisarlo.",
              _obj({"spec": {"type": "object"}, "build": B}, ["spec"]), self.class_plan),
+            ("pt_routed_plan",
+             "Genera (y con build=true construye) una red CON ROUTERS: un Router-PT-Empty y un Switch-PT-Empty por sede, todos los "
+             "routers unidos por un switch central, una subred por sede y encaminamiento. spec={lan_block, prefix (26 = trocear la /24), "
+             "transit, routing: ospf|static|rip, core, origin:[x,y], host_names: octet|site, sites:[{name, pcs, laptops, dhcp?, servers?:[{name, services?}]}]}.",
+             _obj({"spec": {"type": "object"}, "build": B}, ["spec"]), self.routed_plan),
+            ("pt_http_get",
+             "Abre una URL desde el navegador de un PC/portatil/servidor y devuelve la pagina (comprueba 'conectarse al Servidor Web', "
+             "por IP o por nombre DNS). Vacio = no hubo respuesta.",
+             _obj({"device": S, "url": S, "wait_seconds": I}, ["device", "url"]), self.http_get),
             ("pt_clear_workspace",
              "Borra TODOS los dispositivos. Exige confirm=true.",
              _obj({"confirm": B}, ["confirm"]), self.clear_workspace),
@@ -182,11 +194,19 @@ class Tools:
         lines = ["puente: puerto %(port)s | PT conectado: %(pt_connected)s | ultimo poll hace %(last_poll_ago)s s"
                  " | intentos no autorizados: %(unauthorized_attempts)s" % info]
         if info["pt_connected"]:
-            ver, count = self._run(jsgen.status()).split("|")
-            lines.append("Packet Tracer %s | %s dispositivos" % (ver, count))
+            parts = self._run(jsgen.status()).split("|")
+            lines.append("Packet Tracer %s | %s dispositivos" % (parts[0], parts[1]))
+            if len(parts) > 2 and parts[2].strip().lower() == "false":
+                lines.append("AVISO: PT esta en modo SIMULACION: el tiempo no avanza (los ping se quedan sin respuesta, no hay DHCP, "
+                             "STP ni rutas nuevas). Usa pt_realtime para volver a Tiempo real.")
         else:
             lines.append("PT no esta conectado: arranca el Script Module y deja abierta la ventana 'PT-MCP local'.")
         return "\n".join(lines)
+
+    def realtime(self, args):
+        if self._run(jsgen.realtime()).strip().lower() != "true":
+            raise ToolError("PT no cambio a Tiempo real")
+        return "OK Packet Tracer en Tiempo real"
 
     def catalog(self, args):
         return catalog.catalog_text()
@@ -486,6 +506,58 @@ class Tools:
         lines.append(json.dumps(plan, ensure_ascii=False))
         return _clip("\n".join(lines), 60000)
 
+    def routed_plan(self, args):
+        try:
+            plan = planmod.routed_plan(args.get("spec"))
+        except (planmod.PlanError, KeyError, ValueError, TypeError) as exc:
+            raise ToolError("spec invalida: %s" % exc)
+        if args.get("build"):
+            return self.build_topology({"plan": plan})
+        lines = ["Plan con routers: %d dispositivos, %d cables." % (len(plan["devices"]), len(plan["links"]))]
+        for r in plan["routers"]:
+            lines.append("  %s: %s" % (r["device"], ", ".join("%s=%s" % (i["port"], i["ip"]) for i in r["interfaces"])))
+        lines.append("  equipos: " + ", ".join("%s(%s)" % (h["device"], h.get("ip") or h.get("expect_ip") or "dhcp")
+                                               for h in plan["hosts"]))
+        lines.append("JSON del plan (para pt_build_topology):")
+        lines.append(json.dumps(plan, ensure_ascii=False))
+        return _clip("\n".join(lines), 60000)
+
+    def http_get(self, args):
+        dev, url = self._req(args, "device"), str(self._req(args, "url")).strip()
+        if "://" not in url:
+            url = "http://" + url
+        wait = max(1, min(int(args.get("wait_seconds") or 15), 60))
+        if self._run(jsgen.http_get(dev, url)).strip().lower() != "true":
+            raise ToolError("El navegador de %s no acepto la URL %s" % (dev, url))
+        deadline = time.time() + wait
+        while True:
+            time.sleep(1.0)
+            out = self._run(jsgen.http_last(dev))
+            head, _, body = out.partition("\n")
+            if head != "LEN=0":
+                return _clip("OK %s desde %s (%s caracteres):\n%s" % (url, dev, head[4:], body))
+            if time.time() >= deadline:
+                raise ToolError("Sin respuesta de %s desde %s en %d s (servidor apagado, sin ruta, HTTP desactivado "
+                                "o el nombre no se resuelve por DNS)." % (url, dev, wait))
+
+    def _dhcp_in_order(self, device, port, wait=75):
+        """Activa DHCP y espera a que el equipo tenga IP antes de seguir (asi el orden de peticion = orden de IPs)."""
+        self._run(jsgen.set_ip(device, port, None, None, None, True))
+        self._run(jsgen.send_only(device, "ipconfig /renew"))
+        deadline, last_renew = time.time() + wait, time.time()
+        while True:
+            ip = self._run(jsgen.port_ip(device, port)).strip()
+            if ip not in ("", "0.0.0.0"):
+                return ip
+            if time.time() >= deadline:
+                # Se le quita el DHCP: si se quedara pidiendo, cogeria mas tarde la IP que le toca al siguiente.
+                self._run(jsgen.dhcp_off(device, port))
+                raise ToolError("%s no recibio IP por DHCP en %d s (se le ha desactivado el DHCP)" % (device, wait))
+            time.sleep(1.0)
+            if time.time() - last_renew > 8:              # el primer intento falla si el puerto del switch aun no reenvia
+                self._run(jsgen.send_only(device, "ipconfig /renew"))
+                last_renew = time.time()
+
     def clear_workspace(self, args):
         if args.get("confirm") is not True:
             raise ToolError("Operacion destructiva: vuelve a llamar con confirm=true")
@@ -513,6 +585,13 @@ class Tools:
                                         len(plan.get("servers", [])), len(plan.get("routers", [])),
                                         len(plan.get("switches", [])),
                                         ", ".join("%s(%d,%d)" % (d["name"], d["x"], d["y"]) for d in devices)))
+        # Antes de crear nada: si algun nombre del plan ya existe en el archivo se aborta. Si no, los equipos no se
+        # crean y los pasos siguientes (cables, IP, DHCP) acabarian actuando sobre los equipos antiguos del mismo nombre.
+        existing = set(line.split("\t")[0] for line in self._run(jsgen.list_devices()).split("\n") if line.strip())
+        clash = sorted(d["name"] for d in devices if d["name"] in existing)
+        if clash:
+            raise ToolError("Ya existen en el archivo equipos con estos nombres: %s. No se ha creado nada. Cambia los nombres del plan "
+                            "(en pt_routed_plan usa host_names='site' u otro lan_block) o borra los antiguos." % ", ".join(clash))
         report, ok, bad = [], [0], [0]
 
         def step(label, fn):
@@ -542,7 +621,13 @@ class Tools:
 
         for l in plan.get("links", []):
             step("cable %s <-> %s" % (l["a"], l["b"]), lambda l=l: do_link(l))
+        # Si el DHCP lo da un router del plan, los clientes se activan AL FINAL y de uno en uno (en el orden del plan):
+        # si no, piden IP por su cuenta en cualquier orden y el nombre deja de coincidir con la IP.
+        router_dhcp = any(r.get("dhcp_pools") for r in plan.get("routers", []))
+        deferred = [h for h in plan.get("hosts", []) if h.get("dhcp")] if router_dhcp else []
         for h in plan.get("hosts", []):
+            if h in deferred:
+                continue
             step("IP %s" % h["device"], lambda h=h: self.set_ip(
                 {"device": h["device"], "ip": h.get("ip"), "mask": h.get("mask", "255.255.255.0"),
                  "gateway": h.get("gateway"), "dns": h.get("dns"), "port": h.get("port"),
@@ -579,12 +664,19 @@ class Tools:
 
         for r in plan.get("routers", []):
             step("config router %s" % r["device"],
-                 lambda r=r: self.router_config({"device": r["device"], "spec": resolved(r)}))
+                 lambda r=r: self.router_config({"device": r["device"], "spec": resolved(r), "save": bool(r.get("save"))}))
         for sw in plan.get("switches", []):
             step("config switch %s" % sw["device"],
                  lambda sw=sw: self.switch_config({"device": sw["device"], "spec": resolved(sw)}))
         for c in plan.get("cli", []):
             step("cli %s" % c["device"], lambda c=c: self.cli({"device": c["device"], "commands": c["commands"]}))
+        for h in deferred:
+            def dhcp_step(h=h):
+                ip = self._dhcp_in_order(h["device"], h.get("port") or "FastEthernet0")
+                if h.get("expect_ip") and ip != h["expect_ip"] and re.match(r"^\d+\.\d+\.\d+\.\d+$", ip):
+                    raise ToolError("recibio %s y se esperaba %s (nombre e IP no coinciden)" % (ip, h["expect_ip"]))
+                return ip
+            step("DHCP %s" % h["device"], dhcp_step)
         for n in plan.get("notes", []):
             step("nota %s" % n.get("text"), lambda n=n: self.add_note(n))
         report.append("")

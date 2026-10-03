@@ -357,3 +357,83 @@ Archivo: 2 routers `Router-PT-Empty`, 2 LAN con Server-PT DHCP, 2 `AccessPoint-P
 - `NtpServer` del Server-PT: setEnabled/isEnabled, setKeyID/getKeyId, getServerMd5Str. `ntp server <ip>` en el router: sin comprobar todavía.
 - Prueba intermitente arreglada: el puente contesta 404 a un POST desconocido **después** de leer el cuerpo (en Windows la conexión se cortaba a veces).
 - 33 herramientas, 62 pruebas.
+
+## 2026-10-03 (tarde): más retos sobre `4.pkt` — DNS a mano, navegador, red grande con OSPF (no son reglas)
+**DNS: cómo guarda PT un registro hecho a mano.** El usuario creó `clase.com` → `192.168.43.2` en Services > DNS. En el XML del servidor:
+`<DNS_SERVER><ENABLED>1</ENABLED><NAMESERVER-DATABASE><RESOURCE-RECORD><TYPE>A-REC</TYPE><NAME>clase.com</NAME><TTL>86400</TTL><IPADDRESS>…`.
+`DnsServer.getEntryCount()` da 0 para ese registro: **son dos almacenes distintos**. `addIpAddress` escribe en el antiguo (el que nadie consulta) y no hay
+ninguna función IPC que escriba en `NAMESERVER-DATABASE`. Conclusión: **los registros DNS se crean a mano**; el MCP solo puede encender el servicio,
+poner el DNS en los equipos y comprobar que resuelve.
+
+**Navegador por IPC (`HttpClient`).** En PC/portátil/servidor: `getProcess("HttpClient").go("http://…")` → true, y la página llega después a
+`getLastPageContent()` (cadena vacía si no hubo respuesta o el nombre no se resuelve). Comprobado por IP y por nombre (`clase.com`), con control negativo
+(nombre inexistente y servidor con HTTP apagado → vacío). Herramienta nueva `pt_http_get`: sirve para el «Demostrar que podemos conectarnos al Servidor Web».
+
+**Otros procesos descubiertos** (sin usar aún): `HttpServer` (getPage, setUsername/setPassword), `FtpServer.getFtpUserAccountManager`,
+`EmailServer` (addUser, deleteUser, changePassword), `AcsServer` (AAA: addToUserMap, addToClientMap, enableACSServerService), `ArpProcess.getArpTable`,
+`IcmpProcess` (startPing, startTraceRoute), `DhcpClient` (dhcpRelease), `EmailClient`, `PppoeClient`, `TcpProcess`, `UdpProcess`, `SyslogServer`.
+
+**Reto 3: red de empresa generada de una vez — conseguido.** `plan.routed_plan` / `pt_routed_plan`: un `Router-PT-Empty` + `Switch-PT-Empty` por sede,
+switch central de tránsito (`10.0.0.0/24`), la `192.168.50.0/24` troceada en cuatro `/26`, OSPF área 0, DHCP en los routers de dos sedes, granja de
+servidores (DNS, HTTP, NTP). Resultado en PT real: 20 equipos, 19 cables, 56 pasos sin error; OSPF converge en ~40 s (rutas `O` en `show ip route`);
+los seis clientes DHCP recibieron exactamente la IP de su nombre (`74`→`.74` … `140`→`.140`); pings entre sedes; web por IP; NTP sincronizado
+(`show ntp status`: *Clock is synchronized, stratum 2, reference is 192.168.50.4*).
+- **Nombre = último octeto con subredes:** al trocear una sola `/24`, los equipos desde la `+10` de cada subred tienen octetos distintos (74, 138, 202…),
+  así que el nombre por último octeto sigue siendo único. Con una `/24` por sede se repetiría (el generador usa entonces `<Sede>-<octeto>`).
+- **DHCP en orden:** un cliente con DHCP activado pide IP por su cuenta en cuanto puede; para que nombre e IP coincidan hay que activar los clientes de uno
+  en uno, en orden, esperando a que cada uno tenga IP. Los primeros `ipconfig /renew` fallan mientras el puerto del switch no reenvía (~30 s): reintentar.
+  `build_topology` ahora lo hace así cuando el DHCP lo da un router del plan (`expect_ip` comprueba el resultado) y guarda los routers (`save`).
+- `pt_server_services` validado en PT real (un servicio por servidor). `ntp server <ip>` + `show ntp status` funcionan; `show ntp associations` no existe.
+- Si la consola de un router se quedó en `(config…)`, `enable` da error: `pt_cli` ahora manda `end` antes de empezar.
+- El usuario no veía lo que construía porque lo puse a x>1400: **construir siempre en la zona visible** (cerca de lo existente o debajo), y decir dónde.
+- 35 herramientas, 68 pruebas.
+
+## 2026-10-03 (noche): toda la red de `4.pkt` unida, cortafuegos y más investigación del DNS (no son reglas)
+**Reto 4: unir la red de arriba (192.168.40–43) con las cuatro sedes (192.168.50.x/26) — conseguido.**
+- `R-Firewall` (`Router-PT-Empty`, 2 puertos): `Fa0/0 192.168.42.4` en `SW-Transito` y `Fa1/0 10.0.0.5` en `SW-Core` (un módulo más en cada switch con
+  `pt_add_module`, validado como herramienta). OSPF área 0 en los ocho routers; los tres de arriba lo recibieron con `pt_router_config`.
+- **OSPF tarda**: tras tocar un switch de tránsito (se reinicia) las adyacencias se rehacen; contar 1–2 minutos y mirar `show ip ospf neighbor`
+  (`FULL`) y `show ip ospf database` antes de dar nada por roto. Las rutas `O` aparecen bastante después de ver `FULL`.
+- Los routers antiguos tenían rutas estáticas hacia sus propias redes con salto `0.0.0.0` y hacia las vecinas; las quité al pasar a OSPF y ejecuté
+  `clear ip ospf process` (pregunta `[no]:` → contestar `yes`). No quedó demostrado cuál de las dos cosas, o solo la espera, desbloqueó las redes 40 y 41.
+- **Cortafuegos con ACL extendida** en `R-Firewall`: `access-list 110 deny icmp 192.168.41.0 0.0.0.255 192.168.50.0 0.0.0.63`, `permit ip any any`,
+  `ip access-group 110 in` en `Fa0/0`. Verificado: `PC1` (41) no hace ping a los servidores (*Reply from 192.168.42.4: Destination host unreachable*),
+  `PC0` (40) sí, y la web (TCP 80) pasa desde `PC1` y desde portátiles wifi de las dos mitades. `permit ip any any` deja pasar OSPF.
+  `ios.router_config` admite ahora `acls: [{number, rules[], apply[{port, direction}]}]`.
+- Pings entre extremos con TTL 125 (tres routers por medio).
+
+**DNS automático: tres vías más probadas, ninguna sirve.**
+1. Nombres de proceso alternativos (`NameServer`, `DnsServerProcess`…): no existen.
+2. `DnsClient.addIpAddress(nombre, ip)` en el PC (caché local): devuelve true y `getIpOfHost` lo ve, pero ni `ping nombre` ni el navegador lo usan.
+3. Reescribir el archivo: `appWindow.fileSaveToBytes()` devuelve un array de ~109 000 bytes con signo y existe `fileOpenFromBytes`, pero el contenido
+   **no** es el XOR(longitud−i)+zlib de PT 5: la cabecera decodificada no es zlib y cambia en cada llamada. Sin conocer el cifrado no se puede editar.
+   (Además reabrir el archivo entero para añadir un registro sería arriesgado.)
+Conclusión firme: en la 6.0.1 el registro DNS se crea a mano; el MCP lo comprueba con `pt_http_get` o `nslookup`.
+- `appWindow` expone además fileNew/fileOpen/fileSave/fileSaveAs, getPhysicalLocationDialog, getSimulationPanel, getUserCreatedPDU… (sin explorar).
+
+**Consola:** PT recorta el historial de la consola y `pt_cli` devolvía páginas de salida vieja; ahora localiza lo nuevo por una marca. Con el usuario
+trabajando a la vez en la pestaña Config de un router, la consola queda en `(config)` (ya se sale con `end`).
+
+## 2026-10-03 (noche): herramientas nuevas validadas en PT real y un fallo de diseño corregido
+- `pt_http_get` validada como herramienta: por IP, por nombre (`clase.com`) y caso negativo (servidor con HTTP apagado → error claro).
+  `pt_cli` devuelve ya solo la salida nueva. `show access-lists` enseña los aciertos de cada regla (`4 match(es)` en el `deny`).
+- **Fallo real de `pt_routed_plan`:** al construir una segunda red en el mismo archivo, los nombres por último octeto (`10`, `11`, `74`, `75`)
+  ya existían. `pt_build_topology` no lo comprobaba: los equipos no se crearon y los pasos de cable y DHCP apuntaron a los equipos antiguos
+  (sin daño: ya estaban por DHCP). Arreglo: la construcción **comprueba todos los nombres contra el archivo antes de crear nada** y aborta;
+  `routed_plan` admite `host_names: "site"` (`Madrid-74`). El nombre por octeto solo es único dentro de una misma /24.
+- `pt_routed_plan` con `build: true` validado en PT real (2 sedes, RIP v2, `/24` por sede, nombres `Norte-10`…): 23 de 25 pasos bien; rutas RIP,
+  ping entre sedes y `startup-config` guardada. Los 2 fallos fueron de espera: **el primer cliente DHCP tras crear los cables tarda más de 25 s**
+  (el puerto del switch aún no reenvía), siguió pidiendo y el siguiente se llevó su IP. Ahora se esperan 75 s y, si falla, se le desactiva el DHCP.
+  Para deshacer un cruce: `ipconfig /release` en los dos, DHCP apagado en el segundo, renovar el primero, y luego el segundo.
+
+## 2026-10-03 (noche): la red RIP unida al resto (redistribución RIP↔OSPF) y el modo Simulación (no son reglas)
+- **Reto 5:** `R-Firewall` recibió un tercer puerto (`pt_add_module`, `Fa2/0 = 10.0.1.3`) hacia `SW-Rip`. En él: `router rip` (v2, `network 10.0.0.0`,
+  `no auto-summary`, `passive-interface FastEthernet1/0`, **`redistribute ospf 1 metric 2`**) y `router ospf 1` con **`redistribute rip subnets`**.
+  La 6.0.1 acepta los dos `redistribute`. Verificado: `Sur-11` (RIP) → servidor HTTP de la granja (OSPF), `PC0` (red antigua) → `Sur-10`,
+  `140` (Cádiz) → `Norte-10`, y web desde `Norte-10` con `pt_http_get`. `network 10.0.0.0` es con clase: cubre también el núcleo OSPF, de ahí el `passive-interface`.
+- **Modo Simulación = tiempo parado.** A mitad de la prueba PT estaba en Simulación (lo cambió el usuario): el ping se queda en «Pinging…» sin
+  ninguna línea, los puertos de switch siguen en ámbar y no llegan rutas. `appWindow.isRealtimeMode()` lo detecta y
+  `appWindow.getRSSwitch().showRealtimeMode()` lo devuelve a Tiempo real (comprobado). `pt_status` ahora avisa y hay herramienta `pt_realtime`.
+  `getRSSwitch()` tiene también `showSimulationMode` (sin probar).
+- Añadir un módulo a un router lo reinicia: tarda ~1–2 min en rehacer OSPF y RIP (actualizaciones cada 30 s). No dar nada por roto antes.
+- 36 herramientas, 73 pruebas.

@@ -244,6 +244,149 @@ def class_plan(spec):
     return plan
 
 
+ROUTED_LAYOUT = {"col_dx": 430, "core_dy": 0, "router_dy": 130, "switch_dy": 260, "row_dy": 105, "host_dx": 115}
+
+
+def routed_plan(spec):
+    """Red con routers generada con las convenciones aprendidas: un Router-PT-Empty y un Switch-PT-Empty por sede,
+    todos los routers unidos por un switch central (red de transito), una subred por sede y encaminamiento.
+
+    spec = {"lan_block": "192.168.50.0", "prefix": 26,            # la /24 se trocea en subredes /prefix, una por sede
+            "transit": "10.0.0.0",                                  # red /24 de transito: router k = .k+1
+            "routing": "ospf" | "static" | "rip",
+            "core": "SW-Core", "origin": [x, y],
+            "host_names": "octet" | "site",                         # "site" = <Sede>-<octeto>, si el octeto ya esta usado
+            "sites": [{"name": "Madrid", "pcs": 2, "laptops": 1, "dhcp": true,
+                       "servers": [{"name": "DNS"}, {"name": "HTTP", "services": ["http"]}]}]}
+    En cada subred: gateway = primera direccion, servidores desde la +2, equipos desde la +10 (nombre = ultimo octeto,
+    que no se repite entre subredes de la misma /24). Cables rectos; puertos justos; Fa0/0 del router = transito.
+    """
+    import ipaddress
+    if not isinstance(spec, dict) or not spec.get("sites"):
+        raise PlanError("spec necesita 'sites' (al menos una sede)")
+    sites = spec["sites"]
+    prefix = int(spec.get("prefix") or 24)
+    try:
+        block = ipaddress.ip_network("%s/24" % spec.get("lan_block", "192.168.50.0"), strict=False)
+        transit = ipaddress.ip_network("%s/24" % spec.get("transit", "10.0.0.0"), strict=False)
+        subnets = list(block.subnets(new_prefix=prefix)) if prefix > 24 else None
+    except ValueError as exc:
+        raise PlanError("red invalida: %s" % exc)
+    if subnets is None:                                              # una /24 entera por sede: 192.168.50.0, .51.0...
+        subnets = [ipaddress.ip_network("%s/24" % ipaddress.ip_address(int(block.network_address) + 256 * i))
+                   for i in range(len(sites))]
+    if len(sites) > len(subnets):
+        raise PlanError("Con /%d solo caben %d sedes en %s" % (prefix, len(subnets), block))
+    routing = str(spec.get("routing") or "ospf").lower()
+    if routing not in ("ospf", "static", "rip"):
+        raise PlanError("routing debe ser ospf, static o rip")
+    host_names = str(spec.get("host_names") or ("octet" if prefix > 24 else "site")).lower()
+    if host_names not in ("octet", "site"):
+        raise PlanError("host_names debe ser octet o site")
+    core = str(spec.get("core") or "SW-Core")
+    ox, oy = (spec.get("origin") or [100, 80])[:2]
+    L = ROUTED_LAYOUT
+    tmask = str(transit.netmask)
+    dns_ip = ""
+    info = []                                                        # datos calculados por sede
+    for i, site in enumerate(sites):
+        net = subnets[i]
+        base = int(net.network_address)
+        servers = site.get("servers") or []
+        n_hosts = int(site.get("pcs") or 0) + int(site.get("laptops") or 0)
+        if 10 + n_hosts > net.num_addresses - 1 or 2 + len(servers) > 10:
+            raise PlanError("La sede %s no cabe en %s" % (site.get("name"), net))
+        entry = {"site": site, "net": net, "mask": str(net.netmask), "gw": str(ipaddress.ip_address(base + 1)),
+                 "transit_ip": str(ipaddress.ip_address(int(transit.network_address) + i + 1)),
+                 "router": "R-%s" % site["name"], "switch": "SW-%s" % site["name"],
+                 "servers": [(str(s["name"]), str(ipaddress.ip_address(base + 2 + k)), s) for k, s in enumerate(servers)]}
+        for name, ip, _s in entry["servers"]:
+            if name.upper().startswith("DNS") and not dns_ip:
+                dns_ip = ip
+        info.append(entry)
+
+    devices = [{"name": core, "model": "Switch-PT-Empty", "x": ox + (len(sites) - 1) * L["col_dx"] // 2, "y": oy,
+                "ports": len(sites)}]
+    links, hosts, plan_servers, routers, cli, notes = [], [], [], [], [], []
+    for i, e in enumerate(info):
+        site, net = e["site"], e["net"]
+        cx = ox + i * L["col_dx"]
+        pcs, laps = int(site.get("pcs") or 0), int(site.get("laptops") or 0)
+        devices.append({"name": e["router"], "model": "Router-PT-Empty", "x": cx, "y": oy + L["router_dy"], "ports": 2})
+        devices.append({"name": e["switch"], "model": "Switch-PT-Empty", "x": cx, "y": oy + L["switch_dy"],
+                        "ports": 1 + len(e["servers"]) + pcs + laps})
+        links.append({"a": core, "port_a": "FastEthernet%d/1" % i, "b": e["router"], "port_b": "FastEthernet0/0", "cable": "straight"})
+        links.append({"a": e["router"], "port_a": "FastEthernet1/0", "b": e["switch"], "port_b": "FastEthernet0/1", "cable": "straight"})
+        notes.append({"text": "%s/%d" % (net.network_address, net.prefixlen), "x": cx + 45, "y": oy + L["switch_dy"] - 30})
+        port, row = 1, 1
+        base = int(net.network_address)
+
+        def place(name, model, col, count, row_i):
+            x = cx + int((col - (count - 1) / 2.0) * L["host_dx"])
+            devices.append({"name": name, "model": model, "x": x, "y": oy + L["switch_dy"] + row_i * L["row_dy"]})
+
+        if e["servers"]:
+            for k, (name, ip, s) in enumerate(e["servers"]):
+                place(name, "Server-PT", k, len(e["servers"]), row)
+                links.append({"a": e["switch"], "port_a": "FastEthernet%d/1" % port, "b": name, "port_b": "FastEthernet0", "cable": "straight"})
+                port += 1
+                srv = {"device": name, "ip": ip, "mask": e["mask"], "gateway": e["gw"]}
+                if dns_ip:
+                    srv["dns_server"] = dns_ip
+                for key in ("services", "dhcp", "dns"):
+                    if key in s:
+                        srv[key] = s[key]
+                plan_servers.append(srv)
+            row += 1
+        # numeracion: portatiles primero y el mas bajo a la derecha, como en clase
+        number = 10
+        nums = {}
+        for kind, count in (("laptops", laps), ("pcs", pcs)):
+            for col in range(count - 1, -1, -1):
+                nums[(kind, col)] = number
+                number += 1
+        for kind, model, count in (("pcs", "PC-PT", pcs), ("laptops", "Laptop-PT", laps)):
+            for col in range(count):
+                octet = (base & 255) + nums[(kind, col)]
+                name = str(octet) if host_names == "octet" else "%s-%d" % (site["name"], octet)
+                place(name, model, col, count, row)
+                links.append({"a": e["switch"], "port_a": "FastEthernet%d/1" % port, "b": name, "port_b": "FastEthernet0", "cable": "straight"})
+                port += 1
+                ip = str(ipaddress.ip_address(base + nums[(kind, col)]))
+                host = {"device": name, "dhcp": True, "expect_ip": ip} if site.get("dhcp") else \
+                    {"device": name, "ip": ip, "mask": e["mask"], "gateway": e["gw"]}
+                if dns_ip and not site.get("dhcp"):
+                    host["dns"] = dns_ip
+                hosts.append((base + nums[(kind, col)], host))
+            if count:
+                row += 1
+        r = {"device": e["router"], "save": True, "interfaces": [
+            {"port": "FastEthernet0/0", "ip": e["transit_ip"], "mask": tmask},
+            {"port": "FastEthernet1/0", "ip": e["gw"], "mask": e["mask"]}]}
+        if routing == "ospf":
+            r["ospf"] = {"process": 1, "networks": [
+                {"network": str(transit.network_address), "mask": tmask, "area": 0},
+                {"network": str(net.network_address), "mask": e["mask"], "area": 0}]}
+        elif routing == "rip":
+            r["rip"] = {"networks": [str(transit.network_address), str(net.network_address)]}
+        else:
+            r["static_routes"] = [{"network": str(o["net"].network_address), "mask": o["mask"], "next_hop": o["transit_ip"]}
+                                  for o in info if o is not e]
+        if site.get("dhcp"):
+            pool = {"name": str(site["name"]).upper(), "network": str(net.network_address), "mask": e["mask"], "gateway": e["gw"],
+                    "excluded": [{"start": e["gw"], "end": str(ipaddress.ip_address(base + 9))}]}
+            if dns_ip:
+                pool["dns"] = [dns_ip]
+            r["dhcp_pools"] = [pool]
+        routers.append(r)
+    hosts.sort(key=lambda p: p[0])                                   # DHCP: pedir en orden para que nombre = IP
+    plan = {"devices": devices, "links": links, "hosts": [h for _n, h in hosts], "servers": plan_servers,
+            "routers": routers}
+    if spec.get("notes", True):
+        plan["notes"] = notes
+    return plan
+
+
 def resolve_ports(obj, neighbour_ports):
     """Sustituye '@VECINO' por el puerto real que conecta con ese vecino (recursivo).
 

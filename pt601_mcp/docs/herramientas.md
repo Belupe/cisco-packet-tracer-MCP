@@ -9,6 +9,8 @@ Todas devuelven texto. Un error se devuelve como `isError` con un mensaje en esp
 | `pt_catalog` | — | Modelos disponibles (con marca "verificado en 6.0.1") y tipos de cable |
 | `pt_list_devices` | — | Nombre, modelo, tipo, encendido y nº de puertos |
 | `pt_list_ports` | `device` | Puertos del dispositivo y si están libres o conectados |
+| `pt_routed_plan` | `spec`, `build?` | Red con routers: router + switch por sede, switch central, subredes, OSPF/estático/RIP, DHCP por sede. `spec={lan_block, prefix, transit, routing, core, origin, sites:[{name, pcs, laptops, dhcp?, servers?}]}` |
+| `pt_http_get` | `device`, `url`, `wait_seconds?` | Abre una URL desde el navegador de un equipo y devuelve la página (por IP o por nombre DNS) |
 | `pt_class_plan` | `spec`, `build?` | Plan completo con las convenciones de clase (`reglas.md`) a partir del enunciado: `spec={server_switch, servers:[{name, ip, services?, dhcp?}], sites:[{name, pcs, laptops}], hosts_dhcp?, notes?}`. Sin `build` solo lo enseña |
 | `pt_add_note` | `text`, `x`, `y`, `size?` | Nota de texto en el mapa (IP encima de un servidor) |
 | `pt_list_notes` / `pt_remove_note` | — / `id` | Lista o borra notas del mapa |
@@ -17,6 +19,7 @@ Todas devuelven texto. Un error se devuelve como `isError` con un mensaje en esp
 | `pt_remove_module` | `device`, `slot` | Quita el módulo de una ranura (puerto sobrante de un `Switch-PT-Empty`) |
 | `pt_rename_device` | `name`, `new_name` | Cambia el nombre; falla si el nuevo ya existe |
 | `pt_running_config` | `device` | Running-config completa de un router o switch (interfaces, rutas…), sin el `--More--` de la consola |
+| `pt_realtime` | — | Pone PT en Tiempo real (en Simulación no avanza nada); `pt_status` avisa del modo |
 | `pt_snapshot` | — | Lee la red entera del archivo abierto: posición (x, y), IP/máscara/DHCP, cables con puertos y tipo, servicios y pool DHCP de los servidores |
 | `pt_describe` | `device`, `process?`, `port?` | Introspección: lista los métodos de un dispositivo, proceso (`DhcpServer`) o puerto |
 | `pt_read_output` | `device`, `tail_chars?` | Final de la consola |

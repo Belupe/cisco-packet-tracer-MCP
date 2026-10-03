@@ -8,7 +8,7 @@ Lee `GUIA_COMPLETA.md` (arquitectura y mapa de confianza) y `NOTAS.md` (diario t
 cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valores por defecto. Donde ponga `PENDIENTE`, pregunta; no inventes.
 
 ## Estructura
-- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (33 herramientas),
+- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (36 herramientas),
   `jsgen.py` (JavaScript para PT), `ios.py` (comandos IOS), `plan.py` (planes JSON), `catalog.py` (modelos/cables),
   `extension/` (panel + script engine que se pegan/cargan en PT).
 - `tests/` — pruebas sin PT: `python3 -m unittest discover -s tests -v` (o con el python portátil del usuario).
@@ -50,11 +50,14 @@ cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valo
   en el espacio físico y no se pueden mover por IPC). Usa fibra para esos enlaces o construye la red entera desde cero. `pt_connect` avisa.
 - Tras `setPower(false/true)` llama a `skipBoot()`; tras configurar un router, guarda (`save: true`): un reinicio pierde lo no guardado.
 - En un `.pkt` hecho a mano, lee los enlaces reales antes de recablear: no supongas el orden de puertos de `reglas.md`.
+- Si un ping se queda en «Pinging…» sin líneas o nada converge, mira `pt_status`: PT puede estar en modo Simulación (`pt_realtime`).
+- Antes de construir en un archivo con equipos, los nombres del plan no pueden existir ya (la construcción lo comprueba y aborta).
+- Construye siempre en la zona del mapa que el usuario tiene a la vista (junto a lo existente o debajo) y dile dónde está.
 
 ## Lo primero que probablemente haya que reparar (sin validar en PT real)
-1. **Registros DNS de Server-PT**: `DnsServer.addIpAddress(nombre, ip)` devuelve true pero los PCs **no resuelven** el nombre (ver `NOTAS.md`).
-   Pide al usuario que cree un registro A a mano y lee `serializeToXml()` del servidor para ver cómo se guarda de verdad.
-   (Encender/apagar servicios y el DHCP sí están validados.)
+1. **Registros DNS de Server-PT: no se pueden crear por IPC** (comprobado: `addIpAddress` escribe en un almacén que no se consulta; los de verdad
+   están en `<NAMESERVER-DATABASE>` y solo se crean en Services > DNS). Pide al usuario que cree el registro a mano y compruébalo con `pt_http_get`.
+   (Encender/apagar servicios, DHCP de servidor y de router, NTP y OSPF sí están validados.)
 2. **Puertos automáticos** (`jsgen.connect_auto`) y el parseo de `OK X:p <-> Y:q` en `tools.build_topology` (`@VECINO`).
 3. **Panel con token** (`extension/interface.html`): probado solo con un panel simulado.
 4. Modelos del catálogo marcados «sin verificar» (`catalog.py`).

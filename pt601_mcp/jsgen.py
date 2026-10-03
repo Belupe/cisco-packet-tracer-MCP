@@ -35,7 +35,12 @@ def _move(x, y):
 
 
 def status():
-    return wrap('return ipc.appWindow().getVersion() + "|" + net.getDeviceCount();')
+    return wrap('var aw = ipc.appWindow(); return aw.getVersion() + "|" + net.getDeviceCount() + "|" + aw.isRealtimeMode();')
+
+
+def realtime():
+    """Vuelve al modo Tiempo real (comprobado en la 6.0.1: getRSSwitch().showRealtimeMode())."""
+    return wrap('var aw = ipc.appWindow(); aw.getRSSwitch().showRealtimeMode(); return String(aw.isRealtimeMode());')
 
 
 def list_devices():
@@ -171,12 +176,18 @@ def cli(name, commands, answer_dialog):
     return wrap(
         get_dev("d", name) +
         ' var cl = d.getCommandLine(); if (!cl) { return "ERROR: sin consola"; }'
-        ' var before = String(cl.getOutput()).length; var pr = String(cl.getPrompt());'
+        # La salida nueva se localiza por una marca (el final de lo que habia antes) y no por longitud: PT recorta el
+        # historial de la consola cuando crece, y entonces devolvia paginas de salida vieja.
+        ' var o0 = String(cl.getOutput()); var mark = o0.substring(Math.max(0, o0.length - 160)); var pr = String(cl.getPrompt());'
         # 6.0.1 real: una consola sin usar esta en modo "logout" con prompt vacio ("Press RETURN to get started")
         # y se traga el primer comando. Se la despierta con un Enter.
         ' if (pr == "" || String(cl.getMode()) == "logout") { cl.enterCommand(""); pr = String(cl.getPrompt()); }'
+        # Si la consola se quedo dentro de "configure terminal" (alguien la dejo asi), se sale antes de empezar:
+        # "enable" ahi da error y lo demas caeria en el modo equivocado.
+        ' if (pr.indexOf("(config") >= 0) { cl.enterCommand("end"); pr = String(cl.getPrompt()); }'
         ' %s var cmds = [%s]; for (var i = 0; i < cmds.length; i++) { cl.enterCommand(cmds[i]); }'
-        ' var o = String(cl.getOutput()); var neu = o.length >= before ? o.substring(before) : o;'
+        ' var o = String(cl.getOutput()); var at = mark ? o.lastIndexOf(mark) : -1;'
+        ' var neu = at >= 0 ? o.substring(at + mark.length) : o.substring(Math.max(0, o.length - 4000));'
         ' return "PROMPT=" + cl.getPrompt() + "\\n" + neu;' % (dialog, cmds))
 
 
@@ -192,6 +203,28 @@ def running_config(name):
         ' s = s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");'
         ' if (s && s != "!") { o.push((/^(ip address|duplex|speed|switchport|login|no shutdown|shutdown|encapsulation|description) ?/.test(s) ? " " : "") + s); } }'
         ' return o.join("\\n");' % q(name))
+
+
+def http_get(name, url):
+    """Navegador del equipo (proceso HttpClient): go(url) lanza la peticion; la pagina llega despues."""
+    return wrap(
+        get_dev("d", name) +
+        ' var h = (typeof d.getProcess == "function") ? d.getProcess("HttpClient") : null;'
+        ' if (!h) { return "ERROR: " + %s + " no tiene navegador (HttpClient)"; }'
+        ' return String(h.go(%s));' % (q(name), q(url)))
+
+
+def http_last(name):
+    return wrap(get_dev("d", name) + ' return "LEN=" + String(d.getProcess("HttpClient").getLastPageContent()).length + "\\n"'
+                ' + String(d.getProcess("HttpClient").getLastPageContent());')
+
+
+def dhcp_off(name, port):
+    return wrap(get_dev("d", name) + ' var p = d.getPort(%s); if (p) { p.setDhcpClientFlag(false); } return "OK";' % q(port))
+
+
+def port_ip(name, port):
+    return wrap(get_dev("d", name) + ' var p = d.getPort(%s); return p ? String(p.getIpAddress()) : "";' % q(port))
 
 
 def output_length(name):

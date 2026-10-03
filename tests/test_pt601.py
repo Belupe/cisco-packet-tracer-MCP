@@ -267,6 +267,51 @@ class ToolTests(unittest.TestCase):
         self.assertIn("Wireless0 ip=192.168.40.4/255.255.255.0 DHCP (inalambrico)", out)
         self.assertIn('typeof lk.getPort1 != "function"', snap.bridge.sent[0])
 
+    def test_http_get_polls_until_page_arrives(self):
+        fb = FakeBridge(["true", "LEN=0\n", "LEN=62\n<html> Hello, world! </html>"])
+        t = Tools(fb)
+        import pt601_mcp.tools as tools_mod
+        real_sleep, tools_mod.time.sleep = tools_mod.time.sleep, lambda s: None
+        try:
+            out = t.call("pt_http_get", {"device": "10", "url": "clase.com"})
+            self.assertIn("Hello, world!", out)
+            self.assertIn('h.go("http://clase.com")', fb.sent[0])
+            self.assertIn('d.getProcess("HttpClient")', fb.sent[0])
+            with self.assertRaises(ToolError):
+                class Silent(FakeBridge):               # el servidor nunca contesta
+                    def run_js(self, code, timeout=25.0):
+                        return "true" if "h.go(" in code else "LEN=0\n"
+                Tools(Silent([])).call("pt_http_get", {"device": "10", "url": "x.com", "wait_seconds": 1})
+        finally:
+            tools_mod.time.sleep = real_sleep
+
+    def test_status_warns_in_simulation_mode_and_realtime_tool(self):
+        # Caso real: en modo Simulacion los ping se quedaban colgados y las rutas no llegaban.
+        out = Tools(FakeBridge(["6.0.1.0011|49|false"])).call("pt_status", {})
+        self.assertIn("SIMULACION", out)
+        self.assertNotIn("SIMULACION", Tools(FakeBridge(["6.0.1.0011|49|true"])).call("pt_status", {}))
+        self.assertNotIn("SIMULACION", Tools(FakeBridge(["6.0.1.0011|49"])).call("pt_status", {}))
+        fb = FakeBridge(["true"])
+        self.assertIn("Tiempo real", Tools(fb).call("pt_realtime", {}))
+        self.assertIn("getRSSwitch().showRealtimeMode()", fb.sent[0])
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge(["false"])).call("pt_realtime", {})
+
+    def test_cli_finds_new_output_by_marker_not_by_length(self):
+        # PT recorta el historial de la consola: por longitud se devolvian paginas de salida vieja.
+        fb = FakeBridge(["PROMPT=Router#\n"])
+        Tools(fb).call("pt_cli", {"device": "R1", "commands": ["show ip route"]})
+        js = fb.sent[0]
+        self.assertIn("o.lastIndexOf(mark)", js)
+        self.assertNotIn("o.length >= before", js)
+
+    def test_cli_leaves_config_mode_before_starting(self):
+        fb = FakeBridge(["PROMPT=Router#\n"])
+        Tools(fb).call("pt_cli", {"device": "R1", "commands": ["enable"]})
+        js = fb.sent[0]
+        self.assertIn('pr.indexOf("(config") >= 0', js)
+        self.assertLess(js.index('cl.enterCommand("end")'), js.index('var cmds = ["enable"]'))
+
     def test_cli_wakes_idle_console_before_first_command(self):
         # 6.0.1 real: consola sin usar = modo "logout", prompt vacio; el primer comando se perdia.
         fb = FakeBridge(["PROMPT=Router#\n"])
