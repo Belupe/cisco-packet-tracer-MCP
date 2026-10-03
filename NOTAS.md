@@ -169,3 +169,36 @@ Lecciones para el constructor final:
 - Posición de los equipos: en clase se usa un **esquema exacto de organización**; el mapa debe seguirlo (sección 7 de `reglas.md`, pendiente de rellenar).
   `plan.auto_layout` es genérico y no lo cumple; habrá que hacerlo configurable o usar posiciones explícitas.
 - Interpretación de documentos con instrucciones (enunciados): lista de requisitos → preguntar huecos → aplicar `reglas.md` → plan con `dry_run` → verificar al final (ver `CLAUDE.md`).
+
+## 2026-10-03: cómo debe aprender el MCP las costumbres del usuario
+Objetivo: que el MCP se dé cuenta por sí solo de los detalles que en clase se dan por sabidos y el profesor no escribe en los enunciados
+(cómo se posiciona todo, cómo se nombra, desde dónde se ponen las IPs…), y que mejore en todos los aspectos. Nada de esto se aplica aún; es la guía de diseño.
+
+**Limitación a tener presente:** el modelo no recuerda nada entre sesiones por sí solo. Lo aprendido solo permanece si se **escribe** donde el asistente lo lee siempre.
+Por eso hay tres capas, cada una con su sitio:
+
+| Qué se aprende | Dónde se guarda | Quién lo aporta |
+|---|---|---|
+| Costumbres implícitas del usuario (nombres, inicio de IPs, orden de puertos, esquema del mapa, relación nombre↔IP) | `reglas.md` | El usuario, y el MCP las **deduce** de los trabajos del usuario |
+| Lo que pide cada práctica | El enunciado de cada práctica | El profesor |
+| Cómo se comporta Packet Tracer 6.0.1 (trampas, firmas, límites) | `NOTAS.md`, `CLAUDE.md`, código y pruebas | El MCP, al descubrirlo (ya funciona: v0.3) |
+
+**Bucle de aprendizaje a partir de los trabajos del usuario** (el usuario tiene hechas las mismas prácticas, salvo la documentación):
+1. Un caso por práctica: enunciado + trabajo de referencia del usuario (`.pkt`; es binario y solo se lee abriéndolo en PT con el MCP conectado).
+2. **Esperado:** abrir el `.pkt` y leer la red entera (nombres, IPs, VLANs, puertos, cables, posiciones) con una futura `pt_snapshot`.
+3. **Obtenido:** pedir al MCP que construya la práctica desde el enunciado.
+4. **Comparar** esperado y obtenido (hace falta un comparador): cada diferencia es un fallo de costumbre.
+5. Cada diferencia se vuelve permanente: una regla en `reglas.md` o una corrección del código con su prueba.
+
+**Deducción de costumbres:** en vez de que el usuario escriba cada norma, el asistente la deduce de varios trabajos y la **propone** con evidencia
+(p. ej. *«el gateway es siempre la `.1`; visto en 4 de 4 prácticas; ¿la anoto?»*). Solo pasa a `reglas.md` cuando el usuario la confirma.
+Cautelas: con una sola práctica no se distingue costumbre de coincidencia (hacen falta ~3 o más); nada deducido se aplica como regla sin confirmación.
+
+**Costumbres que el MCP debe llegar a captar** (ejemplos dados por el usuario):
+- Cómo se posiciona cada tipo de equipo en el mapa (esquema exacto de clase, sección 7 de `reglas.md`).
+- Cómo se nombran los equipos.
+- **El nombre del equipo corresponde a la IP de ese equipo** (ejemplo real del usuario). *Falta concretar el cómo*: ¿el nombre incluye el último octeto, la IP entera,
+  el número de red? Se preguntará con ejemplos de sus prácticas antes de convertirlo en regla en `reglas.md`.
+
+**Pendiente** (cuando se aborde): `pt_snapshot`, comparador esperado/obtenido, carpeta de casos (enunciado + trabajo de referencia), sección de «propuestas pendientes
+de confirmar» en `reglas.md`. Si el repositorio es público, quitar datos personales de los trabajos antes de subirlos.
