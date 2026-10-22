@@ -673,3 +673,21 @@ trabajando a la vez en la pestaña Config de un router, la consola queda en `(co
 - Pruebas en vivo tras recargar (11:16): `pt_server_ftp` (profe → creado) y `pt_server_email` (luis → creado, ana → ya existía) informan bien;
   `pt_cli` con `interactive` hace la sesión ftp entera (usuario, clave, dir, quit) en una llamada; `pt_ui_open` cierra Command Prompt/IP Configuration
   antes de abrir otra y abre las del Desktop del servidor; capturas sin bordes negros.
+
+## 2026-10-22 (tarde): portátil, exclusiones DHCP, quitar pools y cuentas
+- **Ventana del portátil (Laptop-PT, tipo 17) = la del PC:** pestañas Physical, Config, Desktop, Custom Interface en las mismas x; Config con GLOBAL,
+  Settings, Algorithm Settings, Firewall, IPV6 Firewall, INTERFACE, puertos; Desktop con las mismas 13 aplicaciones en las mismas posiciones. Su icono
+  se abre con el mismo clic (lógico + 15, 0). Physical lista: Linksys-WPC300N, PT-LAPTOP-NM-1AM/1CE/1CFE/1CGE/1FFE/1FGE/1W/1W-A, PT-HEADPHONE,
+  PT-MICROPHONE, PT-CAMERA, PT-USB-HARD-DRIVE.
+- **DHCP del Server-PT:** `removePool("pool2")` quita el pool (devuelve undefined). `addExcludedAddress(ini, fin)` y `removeExcludedAddress(ini, fin)`
+  funcionan (undefined); `getExcludedAddressCount()`, `getExcludedAddressAt(i)` → objeto `{first, second}`.
+  - Prueba de que excluye: pool .60–.80 sin exclusión → un cliente nuevo recibe **.60**; pool .90–.110 con .90–.99 excluido → **.100**.
+  - El servidor reparte **seguido tras la última que dio** (.10, .11, .12…), no la más baja libre; para probar algo, usar una zona del pool sin estrenar.
+  - **Las exclusiones NO se ven en Config → DHCP** (la ventana de la 6.0.1 no tiene ese campo) **ni están en el XML**: lo más probable es que se pierdan al
+    guardar el `.pkt`. Para clase: empezar el pool después de las IP fijas, o DHCP en router con `ip dhcp excluded-address`.
+  - La ventana DHCP enseña *Maximum number of Users* (166 para .90–.110 en una /24: parece contar hasta el final de la red, no del pool).
+- **Cuentas:** `removeFtpUser("alumno")` (undefined; `isExistingUser` pasa a false) y `EmailServer.deleteUser("luis")` (true; `getEmailUser` → null).
+- **Ojo con `pt_add_module` en un switch:** apaga y enciende el equipo y se pierde el running-config no guardado (a S1 se le borraron port-security,
+  modos y descripciones). Guardar antes con `write memory`.
+- `pt_cli` interactivo: con `ipconfig /renew` la respuesta tarda varios segundos y el eco del comando ya cuenta como «respuesta estable»; en la prueba
+  hubo que leer la consola aparte. **Arreglado:** ahora espera a que la última línea parezca un prompt (`>`, `#`, `:`, `?`) o a 3 s sin cambios.

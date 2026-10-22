@@ -21,7 +21,7 @@ No uses nombres de métodos, modelos o puertos de memoria: usa las herramientas 
 - Consulta: `pt_status`, `pt_catalog`, `pt_list_devices`, `pt_list_ports`, `pt_read_output`, `pt_describe`, `pt_snapshot` (red entera: posiciones, IPs, cables, servicios),
   `pt_inspect_ports` (estado real de cada puerto y anomalías), `pt_server_read` (todo *Config → SERVICES*: registros DNS con TTL, FTP, correo…)
 - Puertos y servicios: `pt_set_port` (un puerto: descripción, encendido, velocidad, dúplex, MAC; modo access/trunk, VLAN y port-security por IOS),
-  `pt_server_ftp`, `pt_server_email`, `pt_add_module` con `count`
+  `pt_server_ftp`, `pt_server_email` (crear y borrar cuentas), `pt_dhcp_admin` (quitar pools, exclusiones), `pt_add_module` con `count`
 - Capturas (para documentar): `pt_screenshot` (mapa), `pt_ui_open` (ventana de un equipo en la pestaña/sección pedida, con captura),
   `pt_ui_capture`, `pt_ui_close`. Se guardan en `capturas/`. Necesitan el mapa al 100 % de zoom.
   **Ojo:** una aplicación del Desktop abierta (IP Configuration…) escribe sus valores al cerrarse y pisa lo que haya cambiado el MCP. Las

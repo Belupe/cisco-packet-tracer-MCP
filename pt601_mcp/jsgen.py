@@ -411,6 +411,34 @@ def dhcp_server(name, gateway, dns, start_ip, end_ip, mask, network, pool_name="
         % (q(name), q(pool_name), q(pool_name), q(pool_name), q(pool_name), " ".join(sets)))
 
 
+def dhcp_admin(name, remove_pools, exclude, unexclude):
+    """Pools y exclusiones del DHCP de un Server-PT (firmas comprobadas el 2026-10-22): removePool("<nombre>"),
+    addExcludedAddress(ini, fin), removeExcludedAddress(ini, fin), getExcludedAddressCount/At(i) -> {first, second}.
+    Todas devuelven undefined: se comprueba despues. Al final lista pools y exclusiones."""
+    rp = ", ".join(q(p) for p in remove_pools)
+    ex = ", ".join("[%s, %s]" % (q(a), q(b)) for a, b in exclude)
+    ux = ", ".join("[%s, %s]" % (q(a), q(b)) for a, b in unexclude)
+    return wrap(
+        get_dev("d", name) +
+        ' var dh = null; try { dh = d.getProcess("DhcpServer"); } catch (e0) { dh = null; }'
+        ' if (!dh) { return "ERROR: " + %s + " no tiene el servicio DhcpServer (es un Server-PT?)"; }'
+        ' function pools() { var r = []; for (var i = 0; i < dh.getPoolCount(); i++) { r.push(String(dh.getPoolAt(i).getDhcpPoolName())); } return r; }'
+        ' function excl() { var r = []; for (var i = 0; i < dh.getExcludedAddressCount(); i++) { var e = dh.getExcludedAddressAt(i);'
+        ' r.push(e.first + "-" + e.second); } return r; }'
+        ' function has(list, v) { for (var i = 0; i < list.length; i++) { if (list[i] == v) { return true; } } return false; }'
+        ' var o = []; var RP = [%s]; var EX = [%s]; var UX = [%s];'
+        ' for (var a = 0; a < RP.length; a++) { if (!has(pools(), RP[a])) { o.push("pool\\t" + RP[a] + "\\tno existia"); continue; }'
+        ' dh.removePool(RP[a]); o.push("pool\\t" + RP[a] + "\\t" + (has(pools(), RP[a]) ? "PT no lo quito" : "quitado")); }'
+        ' for (var b = 0; b < UX.length; b++) { var k = UX[b][0] + "-" + UX[b][1]; if (!has(excl(), k)) { o.push("exclusion\\t" + k + "\\tno existia"); continue; }'
+        ' dh.removeExcludedAddress(UX[b][0], UX[b][1]); o.push("exclusion\\t" + k + "\\t" + (has(excl(), k) ? "PT no la quito" : "quitada")); }'
+        ' for (var c = 0; c < EX.length; c++) { var k2 = EX[c][0] + "-" + EX[c][1]; if (has(excl(), k2)) { o.push("exclusion\\t" + k2 + "\\tya existia"); continue; }'
+        ' dh.addExcludedAddress(EX[c][0], EX[c][1]); o.push("exclusion\\t" + k2 + "\\t" + (has(excl(), k2) ? "anadida" : "PT no la anadio")); }'
+        ' var ps = []; for (var i = 0; i < dh.getPoolCount(); i++) { var p = dh.getPoolAt(i);'
+        ' ps.push(p.getDhcpPoolName() + " " + p.getStartIp() + "-" + p.getEndIp() + "/" + p.getSubnetMask()); }'
+        ' o.push("POOLS\\t" + ps.join(", ")); o.push("EXCLUSIONES\\t" + excl().join(", "));'
+        ' return o.join("\\n");' % (q(name), rp, ex, ux))
+
+
 def dns_server(name, records):
     pairs = "[" + ", ".join("[%s, %s]" % (q(r["name"]), q(r["ip"])) for r in records) + "]"
     body = (get_dev("d", name) + _PROC_FINDER % ('["DnsServer","DnsServerMain","DNSServerMain"]', "DNS", q(name)) +
@@ -599,32 +627,40 @@ def server_xml(name):
         ' return o.join("\\n");' % (q(name), tags))
 
 
-def ftp_users(name, users):
-    """users = [(usuario, clave, permisos)]. Firma comprobada: addFtpUser(usuario, clave, "RWDNL"). Si ya existe, no se toca."""
+def ftp_users(name, users, remove=()):
+    """users = [(usuario, clave, permisos)]. Firmas comprobadas: addFtpUser(usuario, clave, "RWDNL") y removeFtpUser(usuario)
+    (las dos devuelven undefined: se mira isExistingUser despues). Si ya existe, no se toca."""
     rows = ", ".join("[%s, %s, %s]" % (q(u), q(p), q(perm)) for u, p, perm in users)
+    rem = ", ".join(q(u) for u in remove)
     return wrap(
         get_dev("d", name) +
         ' var f = d.getProcess("FtpServer"); if (!f) { return "ERROR: " + %s + " no tiene servidor FTP"; }'
-        ' var m = f.getFtpUserAccountManager(); var U = [%s]; var o = [];'
+        ' var m = f.getFtpUserAccountManager(); var U = [%s]; var o = []; var R = [%s];'
+        ' for (var j = 0; j < R.length; j++) { if (!m.isExistingUser(R[j])) { o.push(R[j] + "\\tno existia"); continue; }'
+        ' m.removeFtpUser(R[j]); o.push(R[j] + "\\t" + (m.isExistingUser(R[j]) ? "PT no la borro" : "borrada")); }'
         ' for (var i = 0; i < U.length; i++) { if (m.isExistingUser(U[i][0])) { o.push(U[i][0] + "\\tya existia"); continue; }'
         # addFtpUser devuelve undefined aunque cree la cuenta (comprobado): se mira si existe despues.
         ' m.addFtpUser(U[i][0], U[i][1], U[i][2]); o.push(U[i][0] + "\\t" + (m.isExistingUser(U[i][0]) ? "creado" : "PT lo rechazo")); }'
-        ' return o.join("\\n");' % (q(name), rows))
+        ' return o.join("\\n");' % (q(name), rows, rem))
 
 
-def email_setup(name, domain, users):
-    """Dominio (SmtpServer.setServerDomainName) y cuentas (EmailServer.addUser(usuario, clave)), comprobados en la 6.0.1."""
+def email_setup(name, domain, users, remove=()):
+    """Dominio (SmtpServer.setServerDomainName) y cuentas (EmailServer.addUser(usuario, clave), deleteUser(usuario)),
+    comprobados en la 6.0.1. getEmailUser(nombre) da null si la cuenta no existe."""
     rows = ", ".join("[%s, %s]" % (q(u), q(p)) for u, p in users)
+    rem = ", ".join(q(u) for u in remove)
     dom = (' d.getProcess("SmtpServer").setServerDomainName(%s); o.push("dominio\\t" + d.getProcess("SmtpServer").getServerDomainName());'
            % q(domain)) if domain else ""
     return wrap(
         get_dev("d", name) +
         ' var em = d.getProcess("EmailServer"); if (!em || !d.getProcess("SmtpServer")) { return "ERROR: " + %s + " no tiene servidor de correo"; }'
-        ' var o = [];%s var U = [%s];'
+        ' var o = [];%s var U = [%s]; var R = [%s];'
+        ' for (var j = 0; j < R.length; j++) { if (!em.getEmailUser(R[j])) { o.push(R[j] + "\\tno existia"); continue; }'
+        ' em.deleteUser(R[j]); o.push(R[j] + "\\t" + (em.getEmailUser(R[j]) ? "PT no la borro" : "borrada")); }'
         ' for (var i = 0; i < U.length; i++) { var had = null; try { had = em.getEmailUser(U[i][0]); } catch (e) { had = null; }'
         ' if (had) { o.push(U[i][0] + "\\tya existia"); continue; }'
         ' em.addUser(U[i][0], U[i][1]); o.push(U[i][0] + "\\t" + (em.getEmailUser(U[i][0]) ? "creado" : "PT lo rechazo")); }'
-        ' return o.join("\\n");' % (q(name), dom, rows))
+        ' return o.join("\\n");' % (q(name), dom, rows, rem))
 
 
 def open_dialogs():

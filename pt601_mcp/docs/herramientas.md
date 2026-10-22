@@ -55,8 +55,9 @@ Para `serial`/`console` hay que indicar los puertos.
 | `pt_dns_server` | `device`, `records[{name, ip}]` | Servicio DNS de un Server-PT |
 | `pt_set_port` | `device`, `port`, campos, `dry_run?`, `save?` | Cambia un puerto. **Por API** (comprobado que llega al running-config): `description`, `power`, `speed` (`auto`/10/100/1000), `duplex` (`auto`/`full`/`half`), `mtu`, `mac` (`0011.2233.4455`), `cdp`, `proxy_arp`. **Por IOS** (la API no aplica el troncal): `mode` (`access`/`trunk`), `vlan`, `native_vlan`, `allowed_vlans[]`, `port_security{maximum, violation, sticky, macs[]}`, `ip_bandwidth`, `ip_delay`, `clock_rate`, `ospf{cost, priority, hello, dead, auth_key, md5_key_id, md5_key}` |
 | `pt_server_read` | `device` | Lee todo *Config → SERVICES* de un Server-PT desde su XML: servicios encendidos, **registros DNS (nombre, tipo, IP, TTL)**, pools DHCP, cuentas FTP, correo, NTP, AAA |
-| `pt_server_ftp` | `device`, `users[{name, password, permissions?}]` | Cuentas FTP (`permissions` con letras `RWDNL`, por defecto todas) |
-| `pt_server_email` | `device`, `domain?`, `users[{name, password}]?` | Dominio del correo y cuentas (encender SMTP/POP3 con `pt_server_services`) |
+| `pt_server_ftp` | `device`, `users[{name, password, permissions?}]?`, `remove[]?` | Cuentas FTP (`permissions` con letras `RWDNL`, por defecto todas); `remove` las borra |
+| `pt_dhcp_admin` | `device`, `remove_pools[]?`, `exclude[{start, end}]?`, `unexclude[{start, end}]?` | Quita pools (no `serverPool`) y añade/quita rangos excluidos; sin parámetros los lista. Las exclusiones funcionan pero en la 6.0.1 **no se ven en la ventana ni se guardan en el `.pkt`** |
+| `pt_server_email` | `device`, `domain?`, `users[{name, password}]?`, `remove[]?` | Dominio del correo y cuentas (`remove` las borra) (encender SMTP/POP3 con `pt_server_services`) |
 | `pt_server_services` | `device`, `services[]` | Deja encendidos SOLO esos servicios (`dhcp`, `dns`, `http`, `https`, `tftp`, `ftp`, `smtp`, `pop3`, `ntp`, `syslog`, `email`) y apaga el resto. En planes: `"services": ["dhcp"]` dentro de `servers[]` |
 
 ### `spec` de `pt_router_config`

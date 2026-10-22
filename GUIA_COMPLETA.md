@@ -29,7 +29,7 @@ Claude ──(MCP por stdin/stdout)──> pt601_mcp ──(HTTP 127.0.0.1:54321
 |---|---|---|
 | **Cliente MCP** | VS Code (extensión de Claude) | Lanza `python.exe run.py` y habla con él por stdin/stdout |
 | **`pt601_mcp/mcpproto.py`** | Python | Protocolo MCP mínimo escrito a mano (`initialize`, `tools/list`, `tools/call`) |
-| **`pt601_mcp/tools.py`** | Python | Las 49 herramientas `pt_*`; convierten una orden en JavaScript |
+| **`pt601_mcp/tools.py`** | Python | Las 50 herramientas `pt_*`; convierten una orden en JavaScript |
 | **`pt601_mcp/jsgen.py`** | Python | Fábrica de JavaScript seguro (escapa los valores del usuario) |
 | **`pt601_mcp/ios.py`** | Python | Genera comandos IOS (interfaces, OSPF, VLAN, DHCP…) y valida IPs/máscaras |
 | **`pt601_mcp/plan.py`** | Python | Valida planes JSON, autoposiciona, resuelve `@VECINO` |

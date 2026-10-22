@@ -39,13 +39,15 @@ SWITCH_MODES = {"0": "dynamic desirable", "1": "dynamic auto", "2": "trunk", "3"
 UI_TAB_Y = 43
 UI_TABS = {"physical": 42, "config": 108, "cli": 160, "desktop": 175, "custom interface": 271}
 UI_TABS_BY_TYPE = {0: ("physical", "config", "cli"), 1: ("physical", "config", "cli"),
-                   8: ("physical", "config", "desktop", "custom interface"), 9: ("physical", "config", "desktop", "custom interface")}
+                   8: ("physical", "config", "desktop", "custom interface"), 9: ("physical", "config", "desktop", "custom interface"),
+                   17: ("physical", "config", "desktop", "custom interface")}       # portatil: igual que el PC (medido)
 _UI_HEAD = ["GLOBAL", "Settings", "Algorithm Settings"]
 UI_SECTIONS = {0: _UI_HEAD + ["ROUTING", "Static", "RIP", "INTERFACE"],
                1: _UI_HEAD + ["SWITCH", "VLAN Database", "INTERFACE"],
                8: _UI_HEAD + ["Firewall", "IPv6 Firewall", "INTERFACE"],
                9: _UI_HEAD + ["SERVICES", "HTTP", "DHCP", "TFTP", "DNS", "SYSLOG", "AAA", "NTP", "EMAIL", "FTP",
-                              "FIREWALL", "IPv6 FIREWALL", "INTERFACE"]}
+                              "FIREWALL", "IPv6 FIREWALL", "INTERFACE"],
+               17: _UI_HEAD + ["Firewall", "IPv6 Firewall", "INTERFACE"]}
 UI_SECTION_X, UI_SECTION_Y0, UI_SECTION_DY, UI_SECTION_ROWS = 82, 75, 19, 20
 UI_DESKTOP_PC = {"ip configuration": (90, 145), "dial-up": (210, 145), "terminal": (330, 145), "command prompt": (450, 145),
                  "web browser": (570, 145), "pc wireless": (90, 290), "vpn": (210, 290), "traffic generator": (330, 290),
@@ -53,8 +55,8 @@ UI_DESKTOP_PC = {"ip configuration": (90, 145), "dial-up": (210, 145), "terminal
                  "pppoe dialer": (210, 410), "text editor": (330, 410)}
 UI_DESKTOP_SERVER = {"ip configuration": (92, 140), "command prompt": (212, 140), "traffic generator": (332, 140),
                      "text editor": (452, 140), "web browser": (572, 140), "pppoe dialer": (92, 285), "vpn": (212, 285)}
-UI_DESKTOP = {8: UI_DESKTOP_PC, 9: UI_DESKTOP_SERVER}
-UI_DEVICE_TYPES = {0: "router", 1: "switch", 8: "PC", 9: "servidor"}
+UI_DESKTOP = {8: UI_DESKTOP_PC, 9: UI_DESKTOP_SERVER, 17: UI_DESKTOP_PC}
+UI_DEVICE_TYPES = {0: "router", 1: "switch", 8: "PC", 9: "servidor", 17: "portatil"}
 UI_ICON_DX = 15            # el punto logico del equipo cae en el borde izquierdo del icono, a media altura
 
 
@@ -122,7 +124,7 @@ class Tools:
              "Anade un modulo (un puerto) a un Switch-PT-Empty o Router-PT-Empty que ya existe. kind: fastethernet (por defecto), "
              "fiber y, en routers, gigabit, gigabit-fiber, serial, ethernet, modem. count=N pone N modulos en ranuras seguidas "
              "desde slot (un solo apagado). Apaga y enciende el equipo: guarda antes su "
-             "configuracion (write memory) si es un router ya configurado.",
+             "configuracion (write memory) si es un router o switch ya configurado: al reiniciarse pierde lo no guardado.",
              _obj({"device": S, "slot": I, "kind": S, "count": I}, ["device", "slot"]), self.add_module),
             ("pt_remove_module",
              "Quita el modulo de una ranura (p. ej. un puerto que sobra en un Switch-PT-Empty: ranura n = FastEthernet<n>/1). "
@@ -182,6 +184,13 @@ class Tools:
              "Captura el MAPA (espacio de trabajo logico) como PNG: lo guarda en la carpeta capturas/ del proyecto y ensena la imagen. "
              "filename opcional (sin carpetas).",
              _obj({"filename": S}, []), self.screenshot),
+            ("pt_dhcp_admin",
+             "DHCP de un Server-PT, lo que no hace pt_dhcp_server: remove_pools=[nombres] quita pools (serverPool no se puede), "
+             "exclude=[{start, end}] anade rangos excluidos, unexclude=[{start, end}] los quita. Sin parametros solo lista pools y "
+             "exclusiones. OJO: en la 6.0.1 las exclusiones funcionan pero NO se ven en la ventana ni se guardan en el .pkt.",
+             _obj({"device": S, "remove_pools": {"type": "array", "items": S},
+                   "exclude": {"type": "array", "items": {"type": "object"}},
+                   "unexclude": {"type": "array", "items": {"type": "object"}}}, ["device"]), self.dhcp_admin),
             ("pt_server_read",
              "Lee TODO lo que se ve en Config > SERVICES de un Server-PT (del XML del equipo): que servicios estan encendidos, "
              "registros DNS (nombre, tipo, IP, TTL), pools DHCP, cuentas FTP con permisos, dominio y cuentas de correo, NTP, AAA. "
@@ -189,12 +198,15 @@ class Tools:
              _obj({"device": S}, ["device"]), self.server_read),
             ("pt_server_ftp",
              "Crea cuentas FTP en un Server-PT: users=[{name, password, permissions}] (permisos con letras R W D N L = "
-             "leer, escribir, borrar, renombrar, listar; por defecto RWDNL). Si la cuenta ya existe no la toca.",
-             _obj({"device": S, "users": {"type": "array", "items": {"type": "object"}}}, ["device", "users"]), self.server_ftp),
+             "leer, escribir, borrar, renombrar, listar; por defecto RWDNL). Si la cuenta ya existe no la toca. "
+             "remove=[nombres] borra cuentas.",
+             _obj({"device": S, "users": {"type": "array", "items": {"type": "object"}}, "remove": {"type": "array", "items": S}},
+                  ["device"]), self.server_ftp),
             ("pt_server_email",
              "Correo de un Server-PT: domain (el del boton Set de EMAIL) y cuentas users=[{name, password}]. "
-             "Para encender SMTP/POP3 usa pt_server_services. Si la cuenta ya existe no la toca.",
-             _obj({"device": S, "domain": S, "users": {"type": "array", "items": {"type": "object"}}}, ["device"]),
+             "Para encender SMTP/POP3 usa pt_server_services. Si la cuenta ya existe no la toca. remove=[nombres] borra cuentas.",
+             _obj({"device": S, "domain": S, "users": {"type": "array", "items": {"type": "object"}},
+                   "remove": {"type": "array", "items": S}}, ["device"]),
              self.server_email),
             ("pt_ui_open",
              "Abre la VENTANA de un equipo (como hacer clic en su icono) sin mover el raton, elige pestana (physical, config, cli, "
@@ -466,7 +478,10 @@ class Tools:
                 text = self._run(jsgen.read_output(dev, start, 0))
                 stable = stable + 1 if (text == last and text.strip()) else 0
                 last = text
-                if stable >= 2:                    # un segundo sin cambios: la respuesta ha terminado
+                tail = text.rstrip()
+                # Terminada: 1 s sin cambios y acaba en algo con pinta de prompt (PC>, ftp>, Router#, Username:...), o 3 s
+                # sin cambios aunque no lo parezca. Solo con el eco del comando (ipconfig /renew tarda) se sigue esperando.
+                if (stable >= 2 and tail[-1:] in (">", "#", ":", "?")) or stable >= 6:
                     break
             out.append(last or "")
         return _clip("".join(out))
@@ -982,6 +997,46 @@ class Tools:
         return self._run(jsgen.dhcp_server(self._req(args, "device"), gw, dns, start, str(end), mask,
                                            str(net.network_address), pool))
 
+    @staticmethod
+    def _ranges(items, what):
+        out = []
+        for r in items or []:
+            if not isinstance(r, dict):
+                raise ToolError("%s: cada rango es {start, end}" % what)
+            try:
+                a = ios.check_ip(r.get("start"), "%s.start" % what)
+                b = ios.check_ip(r.get("end") or r.get("start"), "%s.end" % what)
+            except ios.ConfigError as exc:
+                raise ToolError(str(exc))
+            if int(ipaddress.ip_address(a)) > int(ipaddress.ip_address(b)):
+                raise ToolError("%s: el inicio %s es mayor que el final %s" % (what, a, b))
+            out.append((a, b))
+        return out
+
+    def dhcp_admin(self, args):
+        pools = [str(p).strip() for p in args.get("remove_pools") or []]
+        for p in pools:
+            if p.lower() == "serverpool":
+                raise ToolError("serverPool es el pool de fabrica y no se puede quitar (tampoco desde la ventana)")
+            if not re.match(r"^[A-Za-z0-9_-]{1,32}$", p):
+                raise ToolError("nombre de pool invalido: %r" % p)
+        exclude, unexclude = self._ranges(args.get("exclude"), "exclude"), self._ranges(args.get("unexclude"), "unexclude")
+        out = self._run(jsgen.dhcp_admin(self._req(args, "device"), pools, exclude, unexclude))
+        lines = []
+        for row in out.split("\n"):
+            f = row.split("\t")
+            if f[0] in ("pool", "exclusion") and len(f) == 3:
+                lines.append("  %s %s: %s" % (f[0], f[1], f[2]))
+            elif f[0] == "POOLS":
+                lines.append("Pools: %s" % (f[1] or "ninguno"))
+            elif f[0] == "EXCLUSIONES":
+                lines.append("Exclusiones: %s" % (f[1] or "ninguna"))
+        if exclude or "Exclusiones: ninguna" not in lines:
+            lines.append("AVISO: en la 6.0.1 las exclusiones del servidor funcionan, pero no se ven en Config > DHCP ni se guardan "
+                         "en el .pkt. Para algo visible: empieza el pool despues de las IP fijas, o usa un router "
+                         "(ip dhcp excluded-address).")
+        return "\n".join(lines)
+
     def dns_server(self, args):
         records = args.get("records")
         if not isinstance(records, list) or not records:
@@ -1073,14 +1128,23 @@ class Tools:
             out.append((name, pwd, u))
         return out
 
+    @staticmethod
+    def _names(value, what):
+        names = [str(n).strip() for n in (value or [])]
+        if not isinstance(value or [], list) or any(not n or any(c.isspace() for c in n) for n in names):
+            raise ToolError("remove debe ser una lista de nombres de cuenta %s, sin espacios" % what)
+        return names
+
     def server_ftp(self, args):
         rows = []
-        for name, pwd, u in self._accounts(args.get("users"), "FTP"):
+        remove = self._names(args.get("remove"), "FTP")
+        accounts = self._accounts(args.get("users"), "FTP") if (args.get("users") or not remove) else []
+        for name, pwd, u in accounts:
             perms = str(u.get("permissions") or "RWDNL").strip().upper()
             if not perms or any(c not in "RWDNL" for c in perms) or len(set(perms)) != len(perms):
                 raise ToolError("permissions invalidos para %s: %r (letras R W D N L, sin repetir)" % (name, perms))
             rows.append((name, pwd, "".join(c for c in "RWDNL" if c in perms)))       # en el orden de PT
-        out = self._run(jsgen.ftp_users(self._req(args, "device"), rows))
+        out = self._run(jsgen.ftp_users(self._req(args, "device"), rows, remove))
         return "FTP:\n" + "\n".join("  %s: %s" % tuple(line.split("\t", 1)) for line in out.split("\n") if "\t" in line)
 
     def server_email(self, args):
@@ -1088,9 +1152,10 @@ class Tools:
         if domain and (" " in domain or "." not in domain):
             raise ToolError("domain invalido: %r (ej. barriosmadrid.es)" % domain)
         users = [(n, p) for n, p, _u in self._accounts(args["users"], "correo")] if args.get("users") else []
-        if not domain and not users:
-            raise ToolError("Pasa domain, users o los dos")
-        out = self._run(jsgen.email_setup(self._req(args, "device"), domain, users))
+        remove = self._names(args.get("remove"), "de correo")
+        if not domain and not users and not remove:
+            raise ToolError("Pasa domain, users, remove o varios")
+        out = self._run(jsgen.email_setup(self._req(args, "device"), domain, users, remove))
         return "Correo:\n" + "\n".join("  %s: %s" % tuple(line.split("\t", 1)) for line in out.split("\n") if "\t" in line)
 
     def server_services(self, args):

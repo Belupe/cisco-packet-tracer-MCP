@@ -8,7 +8,7 @@ Lee `GUIA_COMPLETA.md` (arquitectura y mapa de confianza) y `NOTAS.md` (diario t
 cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valores por defecto. Donde ponga `PENDIENTE`, pregunta; no inventes.
 
 ## Estructura
-- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (49 herramientas), `winui.py` (capturas y clics en ventanas de Windows),
+- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (50 herramientas), `winui.py` (capturas y clics en ventanas de Windows),
   `jsgen.py` (JavaScript para PT), `ios.py` (comandos IOS), `plan.py` (planes JSON), `catalog.py` (modelos/cables),
   `extension/` (panel + script engine que se pegan/cargan en PT).
 - `tests/` — pruebas sin PT: `python3 -m unittest discover -s tests -v` (o con el python portátil del usuario).

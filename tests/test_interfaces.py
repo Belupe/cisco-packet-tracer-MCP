@@ -166,6 +166,20 @@ class InteractiveCliTests(unittest.TestCase):
         self.assertIn("Password:", out)
 
 
+class InteractiveWaitTests(unittest.TestCase):
+    def test_slow_answer_is_awaited_until_the_prompt_comes_back(self):
+        # ipconfig /renew: primero solo el eco (estable un rato), luego la IP y el prompt PC>.
+        orig = tools_mod.time.sleep
+        tools_mod.time.sleep = lambda s: None
+        try:
+            echo, done = "ipconfig /renew\n", "ipconfig /renew\n\nIP Address......: 10.0.0.40\n\nPC>"
+            fb = FakeBridge(["100", "enviado", echo, echo, echo, echo, done, done, done])
+            out = Tools(fb).call("pt_cli", {"device": "LAP2", "commands": ["ipconfig /renew"], "interactive": True})
+        finally:
+            tools_mod.time.sleep = orig
+        self.assertIn("10.0.0.40", out)
+
+
 class SetPortTests(unittest.TestCase):
     def test_api_fields_use_checked_setters_and_report_readback(self):
         fb = FakeBridge(["setDescription\tENLACE\nsetPower\ttrue\nsetBandwidthAutoNegotiate\tfalse\nsetBandwidth\t10000\n"
@@ -300,6 +314,23 @@ class ServerTests(unittest.TestCase):
             with self.assertRaises(ToolError):
                 Tools(FakeBridge([])).call("pt_server_ftp", {"device": "SRV1", "users": bad})
 
+    def test_accounts_can_be_removed_and_checked_afterwards(self):
+        fb = FakeBridge(["alumno\tborrada\nnadie\tno existia"])
+        out = Tools(fb).call("pt_server_ftp", {"device": "SRV1", "remove": ["alumno", "nadie"]})
+        self.assertIn("m.removeFtpUser(R[j]);", fb.sent[0])
+        self.assertIn('(m.isExistingUser(R[j]) ? "PT no la borro" : "borrada")', fb.sent[0])
+        self.assertIn('var U = []', fb.sent[0])                   # solo borrar: sin cuentas nuevas
+        self.assertIn("alumno: borrada", out)
+        fb = FakeBridge(["luis\tborrada"])
+        out = Tools(fb).call("pt_server_email", {"device": "SRV1", "remove": ["luis"]})
+        self.assertIn("em.deleteUser(R[j]);", fb.sent[0])
+        self.assertNotIn("setServerDomainName", fb.sent[0])
+        self.assertIn("luis: borrada", out)
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge([])).call("pt_server_ftp", {"device": "SRV1", "remove": ["con espacio"]})
+        with self.assertRaises(ToolError):
+            Tools(FakeBridge([])).call("pt_server_ftp", {"device": "SRV1"})
+
     def test_email_domain_and_users(self):
         fb = FakeBridge(["dominio\tbarriosmadrid.es\nana\tya existia\nluis\tcreado"])
         out = Tools(fb).call("pt_server_email", {"device": "SRV1", "domain": "barriosmadrid.es", "users": [
@@ -315,6 +346,36 @@ class ServerTests(unittest.TestCase):
             Tools(FakeBridge([])).call("pt_server_email", {"device": "SRV1"})
         with self.assertRaises(ToolError):
             Tools(FakeBridge([])).call("pt_server_email", {"device": "SRV1", "domain": "sin punto"})
+
+
+class DhcpAdminTests(unittest.TestCase):
+    def test_remove_pool_and_exclusions_use_checked_signatures_and_warn(self):
+        fb = FakeBridge(["pool\tpool2\tquitado\nexclusion\t10.0.0.1-10.0.0.9\tanadida\n"
+                         "POOLS\tserverPool 10.0.0.10-10.0.0.50/255.255.255.0\nEXCLUSIONES\t10.0.0.1-10.0.0.9"])
+        out = Tools(fb).call("pt_dhcp_admin", {"device": "SRV1", "remove_pools": ["pool2"],
+                                               "exclude": [{"start": "10.0.0.1", "end": "10.0.0.9"}]})
+        js = fb.sent[0]
+        self.assertIn('var RP = ["pool2"]', js)
+        self.assertIn('var EX = [["10.0.0.1", "10.0.0.9"]]', js)
+        for call in ("dh.removePool(RP[a])", "dh.addExcludedAddress(EX[c][0], EX[c][1])",
+                     "dh.removeExcludedAddress(UX[b][0], UX[b][1])", "dh.getExcludedAddressAt(i)"):
+            self.assertIn(call, js)
+        self.assertNotIn("\n", js)
+        es3_ok(self, js)
+        self.assertIn("pool pool2: quitado", out)
+        self.assertIn("Exclusiones: 10.0.0.1-10.0.0.9", out)
+        self.assertIn("ni se guardan en el .pkt", out)          # aviso: la 6.0.1 no las guarda ni las ensena
+
+    def test_validation(self):
+        for bad in ({"remove_pools": ["serverPool"]}, {"remove_pools": ["con espacio"]},
+                    {"exclude": [{"start": "10.0.0.9", "end": "10.0.0.1"}]}, {"exclude": [{"start": "x"}]},
+                    {"unexclude": ["10.0.0.1"]}):
+            with self.assertRaises(ToolError):
+                Tools(FakeBridge([])).call("pt_dhcp_admin", dict({"device": "SRV1"}, **bad))
+        out = Tools(FakeBridge(["POOLS\tserverPool 10.0.0.1-10.0.0.9/255.255.255.0\nEXCLUSIONES\t"])).call(
+            "pt_dhcp_admin", {"device": "SRV1"})
+        self.assertIn("Exclusiones: ninguna", out)
+        self.assertNotIn("AVISO", out)
 
 
 class PngAndLocateTests(unittest.TestCase):
@@ -460,6 +521,16 @@ class UiOpenTests(unittest.TestCase):
                          [("click", "WIN-PC1", 175, 43), ("click", "WIN-PC1", 480, 54), ("click", "WIN-PC1", 450, 145),
                           ("click", "WIN-PC1", 480, 54)])
         self.assertFalse(ui.app_open)
+
+    def test_laptop_window_is_laid_out_like_a_pc(self):
+        fb = FakeBridge(["si\t17\t300\t330\tFastEthernet0\nD\tLAP1\t300\t330", "si"])
+        ui = FakeUi(self.map_rows, opened=True)
+        Tools(fb, ui=ui).call("pt_ui_open", {"device": "LAP1", "section": "FastEthernet0"})
+        self.assertEqual([e for e in ui.log if e[0] == "click"], [("click", "WIN-LAP1", 108, 43), ("click", "WIN-LAP1", 82, 75 + 19 * 6)])
+        fb = FakeBridge(["si\t17\t300\t330\tFastEthernet0\nD\tLAP1\t300\t330", "si"])
+        ui = FakeUi(self.map_rows, opened=True)
+        Tools(fb, ui=ui).call("pt_ui_open", {"device": "LAP1", "app": "web browser"})
+        self.assertIn(("click", "WIN-LAP1", 570, 145), ui.log)
 
     def test_server_desktop_has_its_own_layout(self):
         fb = FakeBridge(["si\t9\t500\t280\tFastEthernet0\nD\tSRV1\t500\t280", "si"])
