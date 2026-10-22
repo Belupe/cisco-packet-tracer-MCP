@@ -5,13 +5,12 @@
 > Se ha escrito leyendo el código de `pt601_mcp/` y el del proyecto de referencia
 > ([Mats2208/MCP-Packet-Tracer](https://github.com/Mats2208/MCP-Packet-Tracer), pensado para PT 8.2/9.0).
 
-Cuatro bloques:
+Tres bloques:
 1. [Herramientas de puertos más completas](#1-herramientas-de-puertos)
 2. [Capturas de ventanas de Windows](#2-capturas-de-pantalla-en-windows-ui_open-capture-close)
 3. [Cubrir todos los servicios de servidor](#3-todos-los-servicios-de-servidor)
-4. [Comprobación con el sobrecillo (PDU simple)](#4-comprobación-con-el-sobrecillo-add-simple-pdu)
 
-Al final: [orden de pruebas para clase](#5-orden-sugerido-en-clase) y [registro de resultados](#6-registro-de-resultados).
+Al final: [orden de pruebas para clase](#4-orden-sugerido-en-clase) y [registro de resultados](#5-registro-de-resultados).
 
 ---
 
@@ -237,7 +236,7 @@ El proyecto de referencia cubre `pt_server_dhcp`, `pt_server_dns`, `pt_server_ht
 `HttpsServer`, `TftpServer`, `FtpServer`, `SmtpServer`, `Pop3Server`, `EmailServer`, `NtpServer`, `SyslogServer`, `AcsServer`.
 Anota la lista de métodos de cada uno. Si algún proceso no existe, `getProcess` devuelve `null`.
 
-**P3.2 — Por servicio: escribir, leer para verificar y comprobar desde un cliente.** Hazlo **de uno en uno** y anota en el registro (sección 6):
+**P3.2 — Por servicio: escribir, leer para verificar y comprobar desde un cliente.** Hazlo **de uno en uno** y anota en el registro (sección 5):
 | Servicio | Escribir | Verificar leyendo | Comprobar desde un cliente |
 |---|---|---|---|
 | DHCP varios pools | `addPool`, `addExcludedAddress` (probar firmas una a una) | `getPoolCount`, `getPoolAt(n)` | Un PC de otra red recibe IP del pool correcto (`ipconfig`) |
@@ -260,78 +259,14 @@ en el almacén que usa la interfaz, el fallo que dio el DNS).
 
 ---
 
-## 4. Comprobación con el sobrecillo (Add Simple PDU)
-
-### 4.1 Qué se quiere
-Usar el **sobre** de la barra de herramientas (*Add Simple PDU*) para demostrar, **en una captura**, que se han probado:
-equipo ↔ equipo, equipo → servidores y equipo → routers, y que en la lista de PDU sale **Successful**.
-
-### 4.2 Qué dice la ayuda de la 6.0.1 (`mode_simulation*.htm`, `mode_realtime.htm`)
-- El PDU simple es una forma gráfica de enviar un ping de una sola vez; solo funciona entre equipos con **una interfaz con IP**.
-- En **Realtime** el ping ocurre al instante y el resultado se ve en la **User Created Packet Window**. En **Simulación** el paquete queda en cola hasta pulsar *Auto Capture/Play*.
-- La lista (*Protocol Data Units List*) tiene las columnas **Fire** (doble clic: reenvía el PDU), **Last Status** (*Successful*, *Fail* o *In Progress*), **Source** y **Destination**
-  (y *Edit*). Pertenece a un *escenario* (por defecto *Scenario 0*), y *Toggle PDU List Window* la saca a una ventana propia.
-- Un escenario se reinicia si se escribe un comando en configuración global de un equipo, así que hay que **lanzar los PDU después de configurar**.
-
-### 4.3 Qué hay hoy y qué dice el proyecto de referencia
-- Nosotros: `pt_ping`, `pt_ping_matrix` (todos contra todos) y `pt_traceroute`, todos por la **consola**; `pt_realtime` pone el modo Tiempo real. **Nada usa el sobre.**
-- Ellos: `pt_verify_connectivity` (ping de consola) y las de simulación (`pt_simulation_mode`, `pt_simulation_step`, `pt_read_packet_trace`).
-  Y **declaran que no se puede**: *«PT does not expose it to extensions (the "Add Simple PDU" is GUI-only)»* y *«`pt_send_pdu` does NOT exist»* (lo afirma su documentación, escrita para PT 8/9; no sabemos si en la 6.0.1 es igual).
-- En la 6.0.1 `ipc.appWindow()` expone `getUserCreatedPDU`, `getPDUListWindow`, `getSimulationPanel`, `getCommonToolbar`, `getRealtimeToolbar`, `getSimulationToolbar`…
-  (`NOTAS.md`: «sin explorar»). **No sabemos qué métodos tienen**: puede que la 6.0.1 sí deje crear o leer PDU, o puede que no.
-
-### 4.4 Plan: tres caminos, de mejor a peor
-1. **Por API** (si P4.1 y P4.2 lo permiten): crear el PDU y leer su *Last Status*.
-2. **Por interfaz**: seleccionar la herramienta del sobre, clicar el origen y el destino (UI Automation o clics: **riesgo de dejar activa una herramienta equivocada**) y leer el estado de la lista.
-3. **Modo guiado** (siempre posible): el asistente deja todo preparado (Realtime, red convergida, ventana de la lista de PDU abierta y visible) y te dice
-   qué parejas clicar; después **lee o captura** la lista con las herramientas del bloque 2.
-En los tres, la prueba se cierra con la **captura de la lista de PDU** (bloque 2) mostrando *Successful*, y con `pt_ping` por consola como comprobación de respaldo.
-
-### 4.5 Pruebas en clase
-**P4.1 — ¿Qué métodos tienen esos objetos?** (solo lectura) `pt_eval`, una vez por objeto (`getUserCreatedPDU`, `getPDUListWindow`, `getSimulationPanel`):
-```js
-(function () { var o = ipc.appWindow().getUserCreatedPDU(); var k = []; var m; for (m in o) { k.push(m); } k.sort(); return k.join(", "); })()
-```
-Busca nombres como `add…`, `get…Count`, `…Status`, `fire`. **Apunta la lista completa en `NOTAS.md`.**
-
-**P4.2 — ¿Se puede leer lo que crea el usuario?** Pon PT en Tiempo real, crea **a mano** un sobre entre dos PCs con ping correcto y, con los métodos de P4.1,
-intenta leer cuántos PDU hay, su origen, destino y estado. Después mira si hay método para crear uno (solo si P4.1 lo muestra; **una firma por llamada**).
-
-**P4.3 — Si hay que leerlo de la interfaz:** repite la prueba P2.4 (UI Automation) con la ventana *User Created Packet Window* y comprueba si el texto *Successful* aparece como elemento legible.
-
-**P4.4 — Matriz de pruebas mínima** (cuando haya camino): el escenario de clase con sus parejas.
-| Tipo de prueba | Ejemplo | Esperado |
-|---|---|---|
-| Equipo ↔ equipo (misma red) | PC1 → PC2 | Successful |
-| Equipo ↔ equipo (otra sede, a través de routers) | PC de la sede A → PC de la sede B | Successful |
-| Equipo → servidor (DHCP, DNS, web…) | PC → cada servidor | Successful |
-| Equipo → router (su gateway) | PC → router de su sede | Successful |
-Si algún PDU sale *Fail* en el primer intento, **dispáralo otra vez** (doble clic en *Fire*): el primero puede perderse por ARP o por la convergencia (OSPF tarda ~40 s).
-
-### 4.6 Nota para la documentación de este cambio *(revisar al documentarlo)*
-Cuando se documente este cambio hay que comprobar y dejar escrito:
-- [ ] El requisito tal cual: **captura de la lista de PDU con *Successful*** para equipo ↔ equipo, equipo → servidor y equipo → router.
-- [ ] Qué camino se usó (API, interfaz o guiado) y por qué los otros no valían.
-- [ ] Que se probó en **Tiempo real** y después de configurar y converger la red (los escenarios se reinician con la configuración global).
-- [ ] La matriz de 4.4 con el resultado de cada pareja, y la captura de cada ventana/lista usada (bloque 2).
-- [ ] Que la prueba de respaldo por consola (`pt_ping`) coincide con lo que dice la lista de PDU.
-- [ ] Los límites que haya: si el sobre no se puede automatizar en la 6.0.1, **decirlo claramente** en vez de simularlo con pings de consola.
-
-### 4.7 Criterio de aceptación
-Una captura de la lista de PDU (o de la ventana principal con la lista visible) donde se vean las parejas de la matriz con **Last Status = Successful**, generada
-siguiendo uno de los tres caminos, y la tabla 4.5 rellenada.
-
----
-
-## 5. Orden sugerido en clase
+## 4. Orden sugerido en clase
 1. **Preparar (5 min):** archivo de pruebas, Debug cerrada, `pt_status` conectado, Tiempo real (`pt_realtime`).
-2. **Solo lectura (15 min):** P1.1, P1.2, P3.1, P4.1, P2.1, P2.3. Con esto se sabe qué es posible antes de escribir una línea de código.
+2. **Solo lectura (15 min):** P1.1, P1.2, P3.1, P2.1, P2.3. Con esto se sabe qué es posible antes de escribir una línea de código.
 3. **Capturas (15 min):** P2.2 y P2.4. Decidir en ese momento si el PNG automático sirve para la clase (punto pendiente de 2.4).
 4. **Escrituras reversibles (20 min):** P1.3 y P1.4; después P3.2 servicio por servicio (los más usados primero: HTTP, FTP, EMAIL).
-5. **Sobre (10 min):** P4.2 y P4.4 con la red que ya tengas montada.
-6. **Cerrar:** rellenar la sección 6, pasar los hallazgos a `NOTAS.md` y actualizar «Lo primero que probablemente haya que reparar» en `CLAUDE.md`.
+5. **Cerrar:** rellenar la sección 5, pasar los hallazgos a `NOTAS.md` y actualizar «Lo primero que probablemente haya que reparar» en `CLAUDE.md`.
 
-## 6. Registro de resultados
+## 5. Registro de resultados
 Copia esta tabla en `NOTAS.md` (o rellénala aquí) con la fecha de la prueba. Estados: ✔ funciona · ✘ falla · ➖ no existe en la 6.0.1.
 
 | ID | Prueba | Estado | Valor o mensaje real | ¿Se ve en la ventana gráfica? | Notas |
@@ -347,7 +282,3 @@ Copia esta tabla en `NOTAS.md` (o rellénala aquí) con la fecha de la prueba. E
 | P2.4 | UI Automation ve pestañas | | | — | |
 | P3.1 | Métodos de cada servicio (12 procesos) | | | — | |
 | P3.2 | Servicios: DHCP multipool / HTTP / FTP / EMAIL / AAA / NTP / SYSLOG / TFTP / DNS | | | | |
-| P4.1 | Métodos de `getUserCreatedPDU` y compañía | | | — | |
-| P4.2 | Leer o crear un PDU por API | | | | |
-| P4.3 | Leer la lista de PDU desde la interfaz | | | | |
-| P4.4 | Matriz de 4 tipos de pareja en *Successful* | | | | |
