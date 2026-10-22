@@ -109,7 +109,7 @@ El servidor ejecuta JavaScript dentro de Packet Tracer, así que es una superfic
 ```
 GUIA_COMPLETA.md        esta guía
 CLAUDE.md               contexto para el Claude de VS Code
-reglas.md               TUS convenciones: nombres, IPs, VLANs, puertos, posiciones (el asistente las lee antes de crear nada)
+reglas.md               TUS convenciones (archivo local, no se sube): nombres, IPs, VLANs, puertos, posiciones
 NOTAS.md                diario técnico: hallazgos, hitos y lecciones
 pt601_mcp/              EL PRODUCTO (servidor MCP)
   README.md             instalación y uso

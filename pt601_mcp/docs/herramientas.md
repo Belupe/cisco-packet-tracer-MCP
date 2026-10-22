@@ -11,7 +11,7 @@ Todas devuelven texto. Un error se devuelve como `isError` con un mensaje en esp
 | `pt_list_ports` | `device` | Puertos del dispositivo y si están libres o conectados |
 | `pt_routed_plan` | `spec`, `build?` | Red con routers: router + switch por sede, switch central, subredes, OSPF/estático/RIP, DHCP por sede. `spec={lan_block, prefix, transit, routing, core, origin, sites:[{name, pcs, laptops, dhcp?, servers?}]}` |
 | `pt_http_get` | `device`, `url`, `wait_seconds?` | Abre una URL desde el navegador de un equipo y devuelve la página (por IP o por nombre DNS) |
-| `pt_class_plan` | `spec`, `build?` | Plan completo con las convenciones de clase (`reglas.md`) a partir del enunciado: `spec={server_switch, servers:[{name, ip, services?, dhcp?}], sites:[{name, pcs, laptops}], hosts_dhcp?, notes?}`. Sin `build` solo lo enseña |
+| `pt_class_plan` | `spec`, `build?` | Plan completo con las convenciones de clase (las del código: nombre = último octeto desde la .10, puertos justos, esquema servidor → switch de servidores → sedes) a partir del enunciado: `spec={server_switch, servers:[{name, ip, services?, dhcp?}], sites:[{name, pcs, laptops}], hosts_dhcp?, notes?}`. Sin `build` solo lo enseña |
 | `pt_add_note` | `text`, `x`, `y`, `size?` | Nota de texto en el mapa (IP encima de un servidor) |
 | `pt_list_notes` / `pt_remove_note` | — / `id` | Lista o borra notas del mapa |
 | `pt_remove_link` | `device`, `port` | Quita el cable de ese puerto |

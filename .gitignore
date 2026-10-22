@@ -10,3 +10,6 @@ __pycache__/
 
 # Diario tecnico del asistente: solo local (en GitHub confundia sobre el uso y la documentacion)
 NOTAS.md
+
+# Convenciones personales del usuario (las lee el asistente; cada uno tiene las suyas)
+reglas.md

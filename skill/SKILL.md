@@ -34,8 +34,9 @@ No uses nombres de métodos, modelos o puertos de memoria: usa las herramientas 
 Referencia completa y esquemas: `pt601_mcp/docs/herramientas.md` y `pt601_mcp/docs/ejemplos.md`.
 
 ## Convenciones del usuario (`reglas.md`)
-Antes de crear nada lee **`reglas.md`** (raíz del repositorio): define cómo se nombran los equipos y cómo se reparten IPs, VLANs, puertos y posiciones.
-Manda sobre cualquier valor por defecto. Donde ponga `PENDIENTE`, pregunta una cosa corta al usuario; no inventes. Para redes grandes enseña
+Antes de crear nada mira si existe **`reglas.md`** en la raíz del proyecto: es un archivo **local** de cada usuario (no está en el repositorio)
+que define cómo se nombran los equipos y cómo se reparten IPs, VLANs, puertos y posiciones. Si existe, manda sobre cualquier valor por defecto;
+si no existe, usa los valores por defecto de las herramientas y pregunta al usuario lo que no esté claro (puedes crearle uno con lo que te diga). Donde ponga `PENDIENTE`, pregunta una cosa corta al usuario; no inventes. Para redes grandes enseña
 primero el plan (`pt_build_topology` con `dry_run: true`).
 Para una práctica de servidores + sedes usa `pt_class_plan` (primero sin `build` para enseñar el plan). Usa siempre modelos `PT-Empty`.
 En un Server-PT toca los servicios (`pt_server_services`) solo si el enunciado pide configurar ese servicio. Cuando el usuario enseñe un trabajo suyo, léelo con

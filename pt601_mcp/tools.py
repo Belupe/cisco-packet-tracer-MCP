@@ -270,7 +270,7 @@ class Tools:
              "dry_run=true solo valida. Ver docs/ejemplos.md.",
              _obj({"plan": {"type": "object"}, "dry_run": B}, ["plan"]), self.build_topology),
             ("pt_class_plan",
-             "Genera (y con build=true construye) una red con las CONVENCIONES DE CLASE de reglas.md a partir del enunciado: "
+             "Genera (y con build=true construye) una red con las CONVENCIONES DE CLASE (servidor -> switch de servidores -> sedes) a partir del enunciado: "
              "spec={server_switch, servers:[{name, ip, services?, dhcp?}], sites:[{name, pcs, laptops}], hosts_dhcp?, notes?}. "
              "Pone nombres por ultimo octeto desde la .10 (con hosts_dhcp=true NO renombra: PC0, Laptop0...), puertos justos, "
              "cables, posiciones del esquema, gateway .1 y DNS. "
