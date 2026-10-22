@@ -3,3 +3,4 @@ ejemplos/
 
 __pycache__/
 *.pyc
+*.py[cod]

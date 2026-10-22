@@ -5,12 +5,17 @@
 > Se ha escrito leyendo el código de `pt601_mcp/` y el del proyecto de referencia
 > ([Mats2208/MCP-Packet-Tracer](https://github.com/Mats2208/MCP-Packet-Tracer), pensado para PT 8.2/9.0).
 
-Tres bloques:
+**Para qué sirve.** Completar las herramientas para que el MCP sepa **interpretar tu forma de trabajo**, tanto en la **práctica**
+(Packet Tracer) como en la **documentación**. Prioridades: **1)** interfaces y puertos, **2)** capturas automáticas de las ventanas que
+hagan falta, **3)** servicios de servidor. Lo que no se necesite ahora (como AAA) queda marcado como no prioritario.
+
+Tres bloques y un apéndice para explorar:
 1. [Herramientas de puertos más completas](#1-herramientas-de-puertos)
 2. [Capturas de ventanas de Windows](#2-capturas-de-pantalla-en-windows-ui_open-capture-close)
 3. [Cubrir todos los servicios de servidor](#3-todos-los-servicios-de-servidor)
 
-Al final: [orden de pruebas para clase](#4-orden-sugerido-en-clase) y [registro de resultados](#5-registro-de-resultados).
+Al final: [orden de pruebas para clase](#4-orden-sugerido-en-clase), [registro de resultados](#5-registro-de-resultados) y un
+[apéndice para explorar](#apéndice-para-explorar-sin-compromiso-el-sobrecillo) (sin compromiso).
 
 ---
 
@@ -98,8 +103,26 @@ Anota para cada una: ¿se acepta?, ¿el valor cambia en el getter?, ¿**se ve en
 ## 2. Capturas de pantalla en Windows (`ui_open`, `capture`, `close`…)
 
 ### 2.1 Qué se quiere
-Capturas **de la interfaz gráfica** de Packet Tracer: el mapa y las ventanas de configuración de cada equipo (como las que se sacan en clase con la
-Herramienta Recortes). El texto de la terminal **no** vale como evidencia.
+Que el MCP **haga automáticamente una captura de la ventana que haga falta** (el mapa, o la ventana de configuración de un equipo),
+sin que tengas que ir abriéndola y recortándola a mano. Son capturas **de la interfaz gráfica** de Packet Tracer (como las que se
+sacan en clase con la Herramienta Recortes); el texto de la terminal **no** vale como evidencia.
+
+**Para poder capturar una ventana hay que poder abrirla.** Por eso este bloque necesita herramientas que **abran la interfaz de cada
+equipo** y la dejen en la pestaña correcta antes de capturarla. El flujo completo es:
+
+1. **Abrir** la ventana del equipo (`ui_open`).
+2. **Elegir** la pestaña o sección que se necesita (Config, Desktop, Services…).
+3. **Capturar** esa ventana (`ui_capture`).
+4. **Cerrarla** (`ui_close`), para no dejar ventanas abiertas.
+
+Ejemplos de qué ventana abrir para cada evidencia (las pestañas salen de la ayuda local; **qué captura pide cada práctica hay que confirmarlo con lo que exijan en clase**):
+| Equipo | Ventana que hay que abrir | Qué se ve |
+|---|---|---|
+| Router | *Config* → una interfaz (p. ej. FastEthernet0/0), *Config* → Global (Settings) o Routing (Static, RIP) | Estado del puerto, IP y máscara, nombre. En la parte de abajo, PT enseña los **comandos IOS equivalentes** |
+| Switch | *Config* → Global, Switching (base de VLAN) o una interfaz | VLAN, puertos, nombre |
+| PC o portátil | *Desktop* → IP Configuration (y *Config* → Global/Interfaz) | IP, máscara, gateway, DNS |
+| Servidor | *Services* → DHCP, DNS, HTTP, FTP, EMAIL… y *Config* → interfaz | Configuración de cada servicio |
+| Mapa | Espacio de trabajo lógico | La topología completa (`pt_screenshot`) |
 
 ### 2.2 Qué tiene el proyecto de referencia (no lo tenemos)
 | Herramienta suya | Qué hace |
@@ -215,7 +238,7 @@ Pestaña **Desktop**: *IP Configuration, Command Prompt, Traffic Generator, Text
 | **TFTP** | `TftpServer` | Encender/apagar | Listar y quitar imágenes IOS de la lista |
 | **FTP** | `FtpServer` (`getFtpUserAccountManager`) | Encender/apagar | **Cuentas** (usuario, contraseña) y **permisos** (Write, Read, Delete, Rename, List); listar y quitar archivos |
 | **SYSLOG** | `SyslogServer` | Encender/apagar | **Leer el registro** (hora, equipo, mensaje) |
-| **AAA** | `AcsServer` (`addToUserMap`, `addToClientMap`, `enableACSServerService`) | **Nada**: ni siquiera está en `pt_server_services` | Encender; **clientes** (nombre, IP, clave secreta, tipo Radius o Tacacs) y **usuarios** (usuario, contraseña) |
+| **AAA** *(no prioritario)* | `AcsServer` (`addToUserMap`, `addToClientMap`, `enableACSServerService`) | **Nada**: ni siquiera está en `pt_server_services` | Encender; **clientes** (nombre, IP, clave secreta, tipo Radius o Tacacs) y **usuarios** (usuario, contraseña) |
 | **NTP** | `NtpServer` (`setEnabled`, `setKeyID`, `getKeyId`, `getServerMd5Str`) | Encender/apagar; validado con `ntp server <ip>` + `show ntp status` en el router | **Autenticación** (clave y contraseña) y fijar la fecha/hora a mano |
 | **EMAIL** | `SmtpServer`, `Pop3Server`, `EmailServer` (`addUser`, `deleteUser`, `changePassword`) | Encender/apagar SMTP y POP3 | **Dominio** (botón *Set*) y **cuentas**; **cliente de correo** (`EmailClient`) para enviar y recibir |
 | Ajustes globales | — | Gateway y DNS (`pt_set_ip`) | *Algorithm Settings* (máx. conexiones, sesiones abiertas, timeout): sin explorar |
@@ -223,13 +246,15 @@ Pestaña **Desktop**: *IP Configuration, Command Prompt, Traffic Generator, Text
 | Desktop | `HttpClient`, `EmailClient`, `PppoeClient`, `IcmpProcess`… | IP Configuration (`pt_set_ip`), Command Prompt (`pt_cli` en un PC), Web Browser (`pt_http_get`) | Email, PPPoE Dialer, VPN, Text Editor, Traffic Generator, Firewall, y *Terminal* (consola de un router a través de un PC) |
 
 El proyecto de referencia cubre `pt_server_dhcp`, `pt_server_dns`, `pt_server_http` (páginas), `pt_server_service` (tftp, ftp, syslog, email), `pt_email_client`,
-`pt_host_firewall`, `pt_terminal` y `pt_web_browser`, pero **tampoco cubre AAA**, y su API es la de PT 8/9: hay que reverificarlo todo en la 6.0.1.
+`pt_host_firewall`, `pt_terminal` y `pt_web_browser`. Su API es la de PT 8/9: hay que reverificarlo todo en la 6.0.1.
 
 ### 3.3 Qué hacer (propuesta de herramientas)
-`pt_server_services` ampliada con `aaa`; `pt_dhcp_server` con **varios pools** y exclusiones; `pt_server_http` (páginas, usuario);
-`pt_server_ftp` (cuentas y permisos); `pt_server_email` (dominio y cuentas); `pt_server_aaa` (clientes y usuarios); `pt_server_ntp` (autenticación, hora);
+`pt_dhcp_server` con **varios pools** y exclusiones; `pt_server_http` (páginas, usuario);
+`pt_server_ftp` (cuentas y permisos); `pt_server_email` (dominio y cuentas); `pt_server_ntp` (autenticación, hora);
 `pt_server_syslog` (leer registro); `pt_server_tftp` (listar y quitar); `pt_server_dns_read` (leer registros del XML) más el flujo guiado de alta manual;
 `pt_email_client`, `pt_host_firewall` y `pt_terminal` en los equipos.
+
+AAA (`AcsServer`) **no es prioritario** y queda fuera de este plan por ahora.
 
 ### 3.4 Pruebas en clase
 **P3.1 — Métodos reales de cada servicio** (solo lectura). Con un `Server-PT` de pruebas, `pt_describe` con `process` = `DhcpServer`, `DnsServer`, `HttpServer`,
@@ -243,7 +268,7 @@ Anota la lista de métodos de cada uno. Si algún proceso no existe, `getProcess
 | HTTP páginas | probar los setters que salgan en P3.1 | `getPage` | `pt_http_get` devuelve el texto nuevo |
 | FTP cuentas | `getFtpUserAccountManager` → añadir usuario con permisos | leer cuentas | En un PC: `ftp <ip>` con usuario y clave |
 | EMAIL | `EmailServer.addUser`; dominio | leer usuarios | `EmailClient` de un PC: configurar, enviar y recibir |
-| AAA | `addToClientMap`, `addToUserMap`, `enableACSServerService` | leer mapas | En un router: `aaa new-model` + servidor Radius/Tacacs y probar un acceso |
+| AAA *(opcional)* | `addToClientMap`, `addToUserMap`, `enableACSServerService` | leer mapas | En un router: `aaa new-model` + servidor Radius/Tacacs y probar un acceso |
 | NTP | clave (`setKeyID`) y hora | `getKeyId`, `getServerMd5Str` | `show ntp status` en el router |
 | SYSLOG | — (solo lectura) | leer entradas | En un router: `logging host <ip>`, provocar un evento y mirar el registro |
 | TFTP | listar y quitar imagen | lista | En un router: `copy running-config tftp` |
@@ -264,7 +289,8 @@ en el almacén que usa la interfaz, el fallo que dio el DNS).
 2. **Solo lectura (15 min):** P1.1, P1.2, P3.1, P2.1, P2.3. Con esto se sabe qué es posible antes de escribir una línea de código.
 3. **Capturas (15 min):** P2.2 y P2.4. Decidir en ese momento si el PNG automático sirve para la clase (punto pendiente de 2.4).
 4. **Escrituras reversibles (20 min):** P1.3 y P1.4; después P3.2 servicio por servicio (los más usados primero: HTTP, FTP, EMAIL).
-5. **Cerrar:** rellenar la sección 5, pasar los hallazgos a `NOTAS.md` y actualizar «Lo primero que probablemente haya que reparar» en `CLAUDE.md`.
+5. **Si sobra tiempo:** el apéndice (E1), solo lectura.
+6. **Cerrar:** rellenar la sección 5, pasar los hallazgos a `NOTAS.md` y actualizar «Lo primero que probablemente haya que reparar» en `CLAUDE.md`.
 
 ## 5. Registro de resultados
 Copia esta tabla en `NOTAS.md` (o rellénala aquí) con la fecha de la prueba. Estados: ✔ funciona · ✘ falla · ➖ no existe en la 6.0.1.
@@ -281,4 +307,27 @@ Copia esta tabla en `NOTAS.md` (o rellénala aquí) con la fecha de la prueba. E
 | P2.3 | `DialogManager` | | | | |
 | P2.4 | UI Automation ve pestañas | | | — | |
 | P3.1 | Métodos de cada servicio (12 procesos) | | | — | |
-| P3.2 | Servicios: DHCP multipool / HTTP / FTP / EMAIL / AAA / NTP / SYSLOG / TFTP / DNS | | | | |
+| P3.2 | Servicios: DHCP multipool / HTTP / FTP / EMAIL / NTP / SYSLOG / TFTP / DNS (AAA opcional) | | | | |
+| E1 | *(opcional, apéndice)* Métodos de `getUserCreatedPDU` y compañía | | | — | |
+
+---
+
+## Apéndice. Para explorar (sin compromiso): el sobrecillo
+> **No es una prioridad ni un requisito de este plan.** Se deja anotado para mirarlo si sobra tiempo; sin criterios de aceptación.
+
+**La idea:** usar el sobre de la barra de herramientas (*Add Simple PDU*) para tener, en una captura, la lista de PDU con *Successful*
+entre equipos, servidores y routers.
+
+**Lo que ya se sabe**
+- Ayuda de la 6.0.1: el PDU simple es un ping de una sola vez; la lista tiene las columnas *Fire*, *Last Status* (*Successful*, *Fail* o *In Progress*),
+  *Source* y *Destination*; en Tiempo real el resultado sale al instante. Un escenario se reinicia si se escribe configuración global en un equipo.
+- El proyecto de referencia **afirma que no se puede crear un PDU por API** (su documentación está escrita para PT 8/9). En la 6.0.1 existen
+  `getUserCreatedPDU`, `getPDUListWindow` y `getSimulationPanel` en `ipc.appWindow()`, pero **no se ha mirado qué métodos tienen**.
+- Hoy el MCP comprueba conectividad por la consola (`pt_ping`, `pt_ping_matrix`, `pt_traceroute`); nada usa el sobre.
+
+**Exploración mínima (solo lectura).** `pt_eval`, una vez por objeto (`getUserCreatedPDU`, `getPDUListWindow`, `getSimulationPanel`):
+```js
+(function () { var o = ipc.appWindow().getUserCreatedPDU(); var k = []; var m; for (m in o) { k.push(m); } k.sort(); return k.join(", "); })()
+```
+Anota la lista de métodos en `NOTAS.md`: dirá si merece la pena seguir. Si algún día se sigue, habría tres caminos (API, manejar la interfaz, o un modo
+guiado en el que el asistente lo prepara todo y tú pulsas el sobre), y la captura de la lista saldría de las herramientas del bloque 2.
