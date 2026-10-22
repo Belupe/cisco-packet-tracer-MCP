@@ -1,6 +1,8 @@
 # Trabajos y enunciados de clase del usuario: solo para aprender, no se suben
 ejemplos/
-Ejercicios/
+# (de Ejercicios/ solo se sube su README: la carpeta existe para quien descargue el repo)
+Ejercicios/*
+!Ejercicios/README.md
 
 # Capturas de pantalla que hace el MCP (pt_screenshot, pt_ui_open...)
 capturas/

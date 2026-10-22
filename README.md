@@ -5,6 +5,7 @@ servicios de servidor, hacer ping y sacar capturas de las ventanas, sin mover el
 **Instalación y uso:** [`pt601_mcp/README.md`](pt601_mcp/README.md) (Python portátil, registrar el servidor en Claude y cargar el
 módulo en Packet Tracer).
 
+- Resolver una práctica: deja el enunciado en [`Ejercicios/`](Ejercicios/README.md) y pídeselo al asistente
 - Referencia de herramientas: [`pt601_mcp/docs/herramientas.md`](pt601_mcp/docs/herramientas.md)
 - Ejemplos de planes: [`pt601_mcp/docs/ejemplos.md`](pt601_mcp/docs/ejemplos.md)
 - Cómo funciona por dentro: [`GUIA_COMPLETA.md`](GUIA_COMPLETA.md)
