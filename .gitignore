@@ -7,3 +7,6 @@ capturas/
 
 __pycache__/
 *.py[cod]
+
+# Diario tecnico del asistente: solo local (en GitHub confundia sobre el uso y la documentacion)
+NOTAS.md
