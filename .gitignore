@@ -1,6 +1,9 @@
 # Trabajos y enunciados de clase del usuario: solo para aprender, no se suben
 ejemplos/
+Ejercicios/
+
+# Capturas de pantalla que hace el MCP (pt_screenshot, pt_ui_open...)
+capturas/
 
 __pycache__/
-*.pyc
 *.py[cod]

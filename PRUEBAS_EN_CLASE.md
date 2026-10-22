@@ -1,6 +1,7 @@
 # PRUEBAS_EN_CLASE.md — Qué hay que mejorar y probar en Packet Tracer 6.0.1
 
-> **Estado: plan de pruebas.** Nada de lo que aparece aquí como «falta» está implementado, y nada de lo que hay que
+> **Estado (2026-10-22): plan probado y programado.** El registro de la sección 5 dice qué funcionó; el detalle está en `NOTAS.md`.
+> **Texto original:** nada de lo que aparece aquí como «falta» está implementado, y nada de lo que hay que
 > «sondear» está comprobado en una 6.0.1. Este archivo dice **qué falta, qué probar y cómo saber que ha salido bien**.
 > Se ha escrito leyendo el código de `pt601_mcp/` y el del proyecto de referencia
 > ([Mats2208/MCP-Packet-Tracer](https://github.com/Mats2208/MCP-Packet-Tracer), pensado para PT 8.2/9.0).
@@ -349,19 +350,19 @@ Copia esta tabla en `NOTAS.md` (o rellénala aquí) con la fecha de la prueba. E
 
 | ID | Prueba | Estado | Valor o mensaje real | ¿Se ve en la ventana gráfica? | Notas |
 |---|---|---|---|---|---|
-| P1.1 | Métodos de puerto en switch, PC, servidor | | | — | |
-| P1.2 | Leer datos de un puerto (con y sin cable) | | | — | |
-| P1.3 | Escrituras reversibles de puerto (una fila por setter) | | | | |
-| P1.4 | IOS de tuning y port-security | | | — | |
-| P1.5 | Módulos reales de Router/Switch-PT-Empty | | | — | |
-| P1.6 | Campos sin método conocido (Tx Ring Limit, VLAN Switch Mode) | | | | |
-| P2.1 | `getWorkspaceImage` | | | — | |
-| P2.2 | `PrintWindow` de la ventana principal | | | — | |
-| P2.3 | `DialogManager` | | | | |
-| P2.4 | UI Automation ve pestañas | | | — | |
-| P3.1 | Métodos de cada servicio (12 procesos) | | | — | |
-| P3.2 | Servicios: DHCP multipool / HTTP / FTP / EMAIL / NTP / SYSLOG / TFTP / DNS (AAA opcional) | | | | |
-| E1 | *(opcional, apéndice)* Métodos de `getUserCreatedPDU` y compañía | | | — | |
+| P1.1 | Métodos de puerto en switch, PC, servidor | ✔ | Router 108, PC/servidor 63, switch 54 (con VLAN: `setAccessVlan`, `setAdminOpMode`, `addTrunkVlans`…) | — | 2026-10-22 |
+| P1.2 | Leer datos de un puerto (con y sin cable) | ✔ | Luz 0/1/2 = apagada/ámbar/verde; `getRemotePortName` siempre vacío (vecino por `getLink`) | — | `pt_inspect_ports` |
+| P1.3 | Escrituras reversibles de puerto (una fila por setter) | ✔ | Descripción, encendido, velocidad, dúplex, MTU, MAC, CDP, proxy-ARP, delay | ✔ running-config | `setAdminOpMode` (troncal) ✘: solo cambia la config, no el puerto → por IOS. `pt_set_port` |
+| P1.4 | IOS de tuning y port-security | ✔ | Todos aceptados; `show port-security` y running-config lo confirman | — | En `pt_set_port` |
+| P1.5 | Módulos reales de Router/Switch-PT-Empty | ✔ | Router: PT-ROUTER-NM-1AM, 1CE, 1CFE, 1CGE, 1FFE, 1FGE, 1S, 1SS. Switch: PT-SWITCH-NM-1CE, 1CFE, 1CGE, 1FFE, 1FGE (los del switch, instalados por API) | ✔ | Pestaña Physical, sin Debug. En `pt_catalog`; `pt_add_module` con `kind` y `count` |
+| P1.6 | Campos sin método conocido (Tx Ring Limit, VLAN Switch Mode) | ✔ / ✘ | VLAN: `VlanManager` (`addVlan`…) ✔. Tx Ring Limit: sin método ✘ | ✔ VLAN Database | |
+| P2.1 | `getWorkspaceImage` | ✔ | Array de bytes con signo; se pasa a base64 dentro de PT | — | `pt_screenshot` |
+| P2.2 | `PrintWindow` de la ventana principal | ✔ | Bien en Qt 4; hay que recortar el borde invisible de Windows (líneas negras) | — | Corregido tras compararlo con la Herramienta Recortes |
+| P2.3 | `DialogManager` | ✔ | `getDialog` solo con la ventana abierta; `setVisible(false/true)` la oculta sin destruirla | ✔ | Abrir la primera vez: clic enviado al icono (funciona) |
+| P2.4 | UI Automation ve pestañas | ✘ | 0 elementos | — | Se navega por coordenadas medidas; clics con PostMessage ✔ |
+| P3.1 | Métodos de cada servicio (12 procesos) | ✔ | Existen los 12 | — | Ver `NOTAS.md` |
+| P3.2 | Servicios: DHCP multipool / HTTP / FTP / EMAIL / NTP / SYSLOG / TFTP / DNS (AAA opcional) | ✔ / ✘ | DHCP varios pools y máscara ✔ (`setNetworkMask(red, mascara)`); FTP ✔ (`addFtpUser(u, c, "RWDNL")`); correo ✔; HTTP páginas ✘ (no hay `setPage`); NTP solo número de clave; Syslog sin lectura por API; TFTP sin lista; DNS solo lectura (XML) | ✔ correo | Lectura de todo con `pt_server_read` |
+| E1 | *(opcional, apéndice)* Métodos de `getUserCreatedPDU` y compañía | ✔ lectura | Dispara, edita y borra PDU, pero **no los crea**; el panel de Simulación sí se controla | — | Camino: clics en la herramienta *Add Simple PDU* (sin hacer) |
 
 ---
 

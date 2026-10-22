@@ -495,6 +495,29 @@ trabajando a la vez en la pestaña Config de un router, la consola queda en `(co
   esas redes solo existen a través de la VPN. Sin NAT en los 2811, las VLAN no salen a `8.8.8.8` (esperado).
 - Herramienta nueva `pt_vpn_ipsec` (un extremo cada vez) e `ios.ipsec_vpn`. 2811 marcado como verificado en el catálogo. 40 herramientas, 78 pruebas.
 
+## 2026-10-05: Práctica 2B construida por el asistente (DHCP de servidor, 3 sedes) y lo que falló
+- **Enunciado:** 1 servidor DHCP (`192.168.1.3`) + `SW-ServidorDHCP` + `SW-PARIS` (4 pc, 4 portátiles), `SW-LONDRES` (3, 2), `SW-BERLIN` (3, 3);
+  equipos por DHCP. `pt_class_plan` con `build: true`: 24 dispositivos, 23 cables, 89 pasos sin error (equipos 10–28, puertos justos).
+- **Fallo real: los 19 equipos se quedaron sin IP.** Con DHCP de *servidor*, la construcción activaba el cliente al principio y mandaba un único
+  renew a cada equipo nada más cablear: el puerto del switch aún no reenviaba y todos acabaron en `DHCP request failed`. Minutos después
+  cada equipo pidió IP por su cuenta, en cualquier orden. Arreglo: el DHCP de servidor usa ya el mismo camino que el de router (`_dhcp_in_order`:
+  clientes al final, de uno en uno, reintentando y esperando la IP), y `class_plan` pone `expect_ip` cuando el pool empieza en el primer equipo
+  (la construcción da error si nombre e IP no coinciden). Prueba: `test_user_scenario_builds_in_order`.
+- **Concesiones del Server-PT:** pidiendo de uno en uno, el servidor reparte direcciones seguidas (comprobado: 19 equipos, 19 IP consecutivas).
+  Pero un equipo con el DHCP activo vuelve a pedir solo después de un release, y `setDhcpClientFlag(false)` **no** libera su concesión en el
+  servidor: quedaron ocupadas `.10`–`.20` y el reparto ordenado empezó en la `.21`. Para liberar de verdad: release y apagar el DHCP del
+  equipo acto seguido, uno por uno (pendiente de comprobar).
+- **API:** `DhcpServer` = `addPool`, `removePool`, `getPool`, `getPoolAt`, `getPoolCount`, `addExcludedAddress`, `removeExcludedAddress`,
+  `getExcludedAddressAt/Count`, `setEnable`/`isEnable`. El pool tiene además `getLeaseAt(i)` (objeto con `ipAddress`, `leaseTime`, `macAddress`,
+  `port`) y `getNetworkAddress`; **no hay contador de concesiones ni método para borrarlas**.
+- **OJO, cuelga el motor:** un `pt_eval` que recorría `getLeaseAt(i)` hasta pasarse del final y leía `getMacAddress()` de los puertos dejó el
+  Script Engine sin responder (PT seguía vivo; hizo falta Stop/Start del módulo). No se sabe cuál de las dos llamadas fue. No recorrer
+  `getLeaseAt` sin conocer el número de concesiones.
+- **Panel:** al reiniciar el servidor (token nuevo) el panel se recarga solo tras el 401 y reconecta sin tocar el módulo (comprobado).
+- **2026-10-06, arreglo validado en PT real:** la misma Práctica 2B reconstruida desde un archivo vacío con `pt_class_plan` + `build: true`:
+  70 pasos, 0 errores, y los 19 equipos reciben a la primera la IP de su nombre (`10` → `.10` … `28` → `.28`). `ipconfig` en `10`, `16` y `28`
+  y ping al servidor desde las tres sedes: 4/4.
+
 ## 2026-10-22: interfaces gráficas de la 6.0.1 (según la ayuda local; sin comprobar en PT real)
 - Prioridad del usuario: las **interfaces gráficas** de los equipos (qué ventana abrir y cómo usarla); la terminal/CLI queda en segundo plano.
 - En la 6.0.1 los **servicios de un servidor cuelgan de Config → SERVICES** (no hay pestaña *Services* aparte como en PT 8/9, que usa el proyecto de referencia).
@@ -502,3 +525,151 @@ trabajando a la vez en la pestaña Config de un router, la consola queda en `(co
 - Campos de la ventana de una interfaz: router (Port Status, IP, máscara, Tx Ring Limit; Ethernet: MAC, Bandwidth, Duplex; serie: Clock Rate); switch (Port Status,
   Bandwidth, Duplex, VLAN Switch Mode, VLAN, Tx Ring Limit); PC (Port Status, Bandwidth, Duplex, MAC, SSID, IP, máscara, link local, IPv6). Mapa campo ↔ método de la API y
   mapa tarea ↔ ventana en `PRUEBAS_EN_CLASE.md` (1.7 y 2.8). Sin método conocido para *Tx Ring Limit* ni *VLAN Switch Mode* de puerto.
+
+## 2026-10-22: pruebas de solo lectura de `PRUEBAS_EN_CLASE.md` (archivo de pruebas: R1 Router-PT-Empty, S1 Switch-PT-Empty, PC1, SRV1)
+- **P1.1 — métodos de puerto por tipo de equipo:** router 108, PC y servidor 63 (los mismos), switch 54. El de PC/servidor no tiene
+  OSPF/RIP/NAT/ACL/CDP/ProxyArp/Delay/ZoneMember. El del **switch** no tiene IP, MTU, Delay ni DHCP, pero **sí tiene VLAN por API**:
+  `getAccessVlan`/`setAccessVlan`, `isAccessPort`/`setAccessPort`, `getAdminOpMode`/`setAdminOpMode`, `isAdminModeSet`, `getNativeVlanId`/`setNativeVlanId`,
+  `addTrunkVlans`/`removeTrunkVlans`, `getVoipVlanId`/`setVoipVlanId`, `isNonegotiate`/`setNonegotiateFlag`, `getPortSecurity`.
+- **P1.2 — valores leídos** (de fábrica): `getBandwidth`=100000, `getMtu`/`getIpMtu`=1500, `getDelay`=100 (router), `getClockRate`=2000000 en todos
+  (también en Ethernet), `getNatMode`=0, ACL vacías, `getType`=3 (FastEthernet), `getMacAddress`=`getBia` con formato `0090.0CA0.3E95`.
+  Switch: `AccessVlan=1`, `NativeVlanId=1`, `AdminOpMode=1`, `AccessPort=true`, `VoipVlanId=0`.
+  - **Puertos de router nacen apagados** (`getPower=false`, `isPortUp=false`): el enlace R1–S1 queda caído en los dos extremos.
+  - `getLightStatus`: **0 = apagada, 1 = ámbar** (puerto de switch arrancando STP), **2 = verde**. Sin cable: 0, `isPortUp=false`, `getLink()` = null.
+  - `isFullDuplex` da `false` en un puerto caído y `true` cuando el enlace sube (negociado).
+  - **`getRemotePortName` devuelve siempre vacío** (con y sin cable). El vecino se saca con `getLink()` → `getOtherPort(p)`, `getPort1`, `getPort2`,
+    `getConnectionType`, `getLinkType`.
+- **P1.6 — VLAN:** `S1.getProcess("VlanManager")` **existe** (`addVlan`, `removeVlan`, `changeVlanName`, `getVlan`, `getVlanAt`, `getVlanByName`,
+  `getVlanCount`, `getMaxVlans`, `addVlanInt`, `getVlanInt…`). También `StpMainProcess`. Con los métodos de puerto de arriba, el *VLAN Switch Mode*
+  y la VLAN del puerto se pueden tocar sin IOS (por probar escribiendo). *Tx Ring Limit*: ningún método.
+- **P3.1 — servicios de Server-PT** (los 12 procesos existen):
+  `DhcpServer` (pools y exclusiones, ya conocido) · `DnsServer` (`addIpAddress`, `getEntryAt/Count`, `getIpAddOfDomain`, `isDomainNameExisted`,
+  `isValidName`, `removeIpAddress`, `get/setPortNumber`, `setEnable`/`isEnabled`) · `HttpServer` (`getPage`, `get/setUsername`, `get/setPassword`;
+  **no hay `setPage`**: editar páginas no parece posible por API) · `HttpsServer` (igual + `setHttpsEnable`) · `TftpServer` (solo encender; **no hay
+  métodos para listar imágenes**) · `FtpServer` (`getFtpUserAccountManager` → `addFtpUser`, `removeFtpUser`, `isExistingUser`; no hay método para
+  listar cuentas) · `SmtpServer` (`get/setServerDomainName`) · `Pop3Server` (solo encender) · `EmailServer` (`addUser`, `deleteUser`,
+  `changePassword`, `getEmailUser`) · `NtpServer` (`setKeyID`, `getKeyId`, `getServerMd5Str`) · `SyslogServer` (`get/setPortNumber`; **no hay
+  método para leer el registro**) · `AcsServer` (`addToClientMap`, `addToUserMap`, `deleteFrom…Map`, `enableACSServerService`).
+  Nota: `HttpServer.setEnable` pero `TftpServer`/`FtpServer`/`NtpServer.setEnabled` (con «d»).
+- **P2.1 — `getWorkspaceImage("PNG")` funciona:** devuelve un objeto cuyo `String()` es la lista de bytes con signo separados por comas, con la firma
+  PNG (`-119,80,78,71,13,10,26,10`). Mapa de 4 equipos: 36 935 caracteres (~10 KB de PNG), 559 px de ancho.
+- **P2.3 — `DialogManager` existe:** `getDialog`, `getCurrentDialog`, `closeAll`. `getDialog("R1")` devuelve null si la ventana del equipo no se ha
+  abierto nunca; `getCurrentDialog` = null sin ventanas abiertas.
+- **Cuelgues del motor (2 hoy, con la ventana Debug CERRADA):** (1) un `pt_eval` con `getLink().getOtherPort(p)` y `getPort().getPortSecurity()`;
+  (2) uno que probaba tres firmas de `FtpUserAccountManager.addFtpUser` seguidas dentro de `try/catch`. El `try/catch` **no** protege: una
+  llamada IPC con argumentos que no encajan puede colgar el Script Engine aunque Debug esté cerrada (hay que hacer Stop/Start del módulo).
+  Regla: **una firma desconocida por llamada**, y nunca `getOtherPort` ni `getPortSecurity` (el vecino sale de `getPort1`/`getPort2`).
+- **P1.3 — setters de puerto (todos aceptados y restaurados):** `setDescription`, `setBandwidth`, `setBandwidthAutoNegotiate`, `setDuplexAutoNegotiate`,
+  `setFullDuplex`, `setMtu`, `setDelay`, `setCdpEnable`, `setProxyArpEnabled` (router); `setDescription`, `setBandwidth` (switch); `setDescription`,
+  `setMtu` (PC). Se ven en el **running-config**: `setDescription` → `description …`; `setPower(true)` en router → desaparece `shutdown`;
+  `setCdpEnable(false)` → `no cdp enable`; `setAccessVlan(10)` → `switchport access vlan 10`.
+  - `getBandwidth`/`setBandwidth` son la **velocidad física** (kbps), NO el `bandwidth` del IOS: tras `bandwidth 5000` por CLI, `show interfaces`
+    dice `BW 5000 Kbit` y `getBandwidth()` sigue en 100000 (el del IOS estará en `getBandwidthInfo`, por comprobar).
+  - `getDelay` va en **microsegundos**; el `delay` del IOS en decenas de µs (`delay 50` → `getDelay()` = 500, `DLY 500 usec`).
+- **Modo de un puerto de switch:** `setAdminOpMode(n)` / `getAdminOpMode()`: **0 = dynamic desirable, 1 = dynamic auto (de fábrica), 2 = trunk,
+  3 = access** (comprobado con el running-config: `switchport mode …`). `isAccessPort()` devuelve `true` siempre: no sirve para saber el modo.
+- **VLAN por API:** `VlanManager.addVlan(20, "PRUEBA")` = `true` y sale en `show vlan brief`. Las VLAN se listan con `getVlanAt(i)` →
+  `getVlanNumber()`, `getName()` (por defecto: 1, 1002–1005; máximo 255). **`setAccessVlan(10)` NO crea la VLAN 10** (el IOS sí lo haría): el puerto
+  queda fuera de `show vlan brief`. Hay que crearla antes con `addVlan`.
+- **P1.4 — IOS aceptado sin errores en la 6.0.1:** router: `bandwidth`, `delay`, `ip ospf cost|hello-interval|dead-interval|priority`,
+  `ip ospf authentication-key`, `ip ospf message-digest-key 1 md5 …` (salen en el running-config; `bandwidth 100000` y `delay 10` no salen porque
+  son los de fábrica). La API los lee: `getOspfCost`=5, `getOspfHelloInterval`=5, `getOspfPriority`=10. Switch: `switchport port-security`,
+  `… maximum 2`, `… violation restrict`, `… mac-address sticky`, `… mac-address 0001.0001.0001`; `show port-security interface` lo confirma.
+- **P3.2 (parcial) — escrituras de servicios aceptadas:** `HttpServer.setUsername/setPassword` (se leen igual); `SmtpServer.setServerDomainName`;
+  `EmailServer.addUser("ana", "1234")` = `true`, y `getEmailUser("ana")` da un objeto con `getName`, `getPassword`, `getMailId`, `getUser`…
+  `NtpServer`: de fábrica `getKeyId()`=0 y `getServerMd5Str()` vacío. **Falta ver si todo esto aparece en Config → SERVICES** (P3.3).
+- **P3.3 (ventana gráfica, visto por el usuario):** SRV1 → EMAIL enseña el dominio y el usuario `ana` escritos por API ✔. S1 → VLAN Database
+  enseña la VLAN 20 `PRUEBA` ✔. En HTTP **no hay** campos de usuario/contraseña en la ventana de la 6.0.1 (`setUsername`/`setPassword` existen
+  pero no se ven).
+- **`setAdminOpMode(2)` NO aplica el troncal:** cambia el running-config (`switchport mode trunk`) pero `show interfaces … switchport` sigue en
+  *Operational Mode: static access* y la ventana del puerto enseña *Access, VLAN 1*. Con el comando IOS `switchport mode trunk` el modo operativo
+  pasa a *trunk* al momento. Conclusión: **modo troncal/acceso por IOS** (`pt_switch_config`), no por API.
+- **`setAccessVlan` + `VlanManager.addVlan` sí funcionan de verdad:** tras crear la VLAN 10 por API, el puerto al que se le puso `setAccessVlan(10)`
+  aparece en `show vlan brief` dentro de la VLAN 10.
+- Consola: un comando desconocido (p. ej. `q` fuera de un `--More--`) se toma como nombre de equipo y el IOS se queda ~1 min «Translating… domain
+  server»; mientras tanto `pt_cli` no devuelve nada. Los cambios hechos en la ventana *Config* de un switch se escriben también en su consola.
+- **P2.2 — `PrintWindow` sí captura PT 6.0.1 (Qt 4):** ventana principal 829x671, imagen correcta (no negra). Una ventana **oculta** sale negra.
+- **P2.4 — UI Automation NO ve nada:** `AutomationElement.FromHandle(ventana de PT).FindAll(Descendants)` = 0 elementos. La accesibilidad de Qt 4 no
+  está activa: no se pueden elegir pestañas por UI Automation.
+- Ventanas de nivel superior del proceso `PacketTracer6` (clase `QWidget`): la principal «Cisco Packet Tracer», el panel «PT-MCP local», «Configure PT
+  Script Modules» (oculta) y tres ocultas sin título de 960x432.
+- **P2.3:** `DialogManager.getDialog("PC1")` sigue dando null aunque la ventana de PC1 se haya abierto y cerrado antes.
+- **`DialogManager.getDialog("<nombre>")` solo existe mientras la ventana del equipo está abierta** (cerrarla con la X la destruye: vuelve a dar
+  null). El objeto tiene `setVisible`, `setWidgetVisible`, `setDisabled`, `setWidgetDisable`, `disableCLIImportExport`. **`setVisible(false)` la oculta
+  sin destruirla** (getDialog sigue dando el objeto) y `setVisible(true)` la vuelve a enseñar. La ventana de Windows se titula como el equipo (`PC1`).
+- **Clics sin mover el ratón (PostMessage WM_LBUTTONDOWN/UP a la ventana de nivel superior) SÍ funcionan en Qt 4:** cambian de pestaña, eligen
+  sección y, en el lienzo de la ventana principal, **un clic sobre el icono abre la ventana del equipo**. Antes se manda Esc (herramienta Select).
+- **Cómo saber dónde está el icono en la ventana:** el PNG de `getWorkspaceImage` aparece píxel a píxel dentro de la captura de la ventana principal;
+  buscando un trozo de 12x12 (fila a fila con `bytes.find`) sale el desfase (9, 111) con el lienzo sin desplazar (incluye el desplazamiento si lo
+  hay; con zoom distinto de 100 % no coincidiría). El punto lógico `getXCoordinate/getYCoordinate` cae en el **borde izquierdo del icono, a media
+  altura**: `lógico + (15, 0)` cae dentro del icono de router, switch, PC y servidor.
+- **Ventanas de equipo (655x521):** pestañas a y=43: Physical x=42, Config x=108, CLI x=160 (router/switch) o Desktop x=175 (PC/servidor),
+  Custom Interface x=271. Lista de secciones de Config: x=82, filas cada 19 px desde y=75:
+  router GLOBAL, Settings, Algorithm Settings, ROUTING, Static, RIP, INTERFACE, puertos · switch GLOBAL, Settings, Algorithm Settings, SWITCH,
+  VLAN Database, INTERFACE, puertos (sin Vlan1) · servidor GLOBAL, Settings, Algorithm Settings, SERVICES, HTTP, DHCP, TFTP, DNS, SYSLOG, AAA, NTP,
+  EMAIL, FTP, FIREWALL, IPv6 FIREWALL, INTERFACE, puertos · PC GLOBAL, Settings, Algorithm Settings, Firewall, IPv6 Firewall, INTERFACE, puertos.
+  Desktop del PC (iconos, centro aprox.): fila y≈145: IP Configuration x≈90, Dial-up 210, Terminal 330, Command Prompt 450, Web Browser 570;
+  fila y≈290: PC Wireless, VPN, Traffic Generator, MIB Browser, Cisco IP Communicator; fila y≈410: E Mail, PPPoE Dialer, Text Editor.
+- **P1.5 sin Debug:** la pestaña Physical de un Router-PT-Empty lista sus módulos: PT-ROUTER-NM-1AM, 1CE, 1CFE, 1CGE, 1FFE, 1FGE, 1S, 1SS.
+- `setBandwidth`/`setFullDuplex`/`setMtu` con la autonegociación apagada salen en el running-config (`speed 10`, `duplex full`, `mtu 1400`).
+  `setMacAddress("0011.2233.4455")` funciona (formato Cisco con puntos).
+- `pt_add_module` con `count`: varios módulos con un solo apagado (probado: 2 puertos de golpe en S1).
+- **FTP: `getFtpUserAccountManager().addFtpUser("pepe", "1234", "RWDNL")` FUNCIONA** (usuario, clave, permisos en letras: Write, Read, Delete,
+  reName, List). La cuenta aparece en el XML. Lo que colgó el motor fue la variante siguiente, con 2 argumentos.
+- **El XML del servidor (`serializeToXml`) tiene TODO lo de Config > SERVICES** y sirve de lectura de verificación: `<HTTP_SERVER>` (ENABLED, USERNAME,
+  PASSWORD), `<DNS_SERVER>` (ENABLED, NAMESERVER-DATABASE/RESOURCE-RECORD), `<DHCP_SERVER>` (ENABLED, POOLS/POOL: NAME, NETWORK, MASK, DEFAULT_ROUTER,
+  TFTP_ADDRESS, START_IP, END_IP, DNS_SERVER, MAX_USERS, DHCP_POOL_LEASES; DHCP_RESERVATIONS), `<TFTP_SERVER>` (ENABLED), `<FTP_SERVER>` (ENABLED,
+  USER_ACCOUNT_MNGR/ACCOUNT: USERNAME, PASSWORD, PERMISSIONS; de fábrica cisco/cisco/RWDNL), `<NTP_SERVER>` (ENABLED, ENABLED_SERVER_AUTHENTICATE, KEY,
+  MD5PASSWORD), `<SYSLOG_SERVER>` (ENABLED), `<ACS_SERVER>` (ENABLED, USERS, ACS_CLIENTS, RADIUS_SETTINGS/AUTH_PORT), `<EMAIL_SERVER>` (SMTP_ENABLED,
+  SMTP_DOMAIN, POP3_ENABLED, FORWARD_MAIL, NO_OF_USERS, USER<n>, PASSWORD<n>, NO_OF_MAILS<n>). XML de un Server-PT: ~69 KB.
+- **DHCP con varios pools y máscara (resuelto):** `DhcpServer.addPool("pool2")` crea un pool (devuelve undefined; `getPoolCount` sube). El pool tiene
+  `setNetworkMask(red, mascara)` **con dos argumentos** (`"10.0.0.0", "255.255.255.0"`): con uno daba *Invalid arguments*, y por eso se creía que la máscara
+  no se podía cambiar. Ojo: `setNetworkMask` pone inicio y fin a la red entera, así que va antes que `setStartIp/setEndIp`. Métodos del pool:
+  `getDhcpPoolName`, `getNetworkAddress`, `getSubnetMask`, `get/setStartIp`, `get/setEndIp`, `get/setDefaultRouter`, `get/setDnsServerIp`,
+  `setNetworkMask`, `getLeaseAt`. `serverPool` toma red y máscara de la IP del servidor al cambiarla (10.0.0.2 → 10.0.0.0/24, rango .0–1.255).
+  `pt_dhcp_server` ya lo usa (parámetro `pool` para un pool nuevo). Sin comprobar aún: que un cliente de otra red reciba IP del pool nuevo (ip helper),
+  y las firmas de `removePool` y `addExcludedAddress`.
+- **Syslog:** con `logging host` en un router y eventos (`shutdown`/`no shutdown`), el XML del servidor sigue con `<SYSLOG_SERVER><ENABLED>1</ENABLED>` y
+  `SyslogServer` solo tiene `get/setPortNumber`, `setEnable`, `isEnabled`: **las entradas no se pueden leer por API**. Camino: captura de la ventana
+  (`pt_ui_open` sección SYSLOG).
+- Consola: `pt_cli` NO hace `enable` solo; si la consola estaba en modo usuario (`Switch>`) los comandos de configuración dan `% Invalid input` y una palabra
+  suelta como `end` lanza «Translating… domain server» (~1 min bloqueada). `pt_set_port` sí empieza siempre por `enable`.
+- **NTP:** `NtpServer.setKeyID(1)` funciona (`<KEY>1</KEY>` en el XML), pero **no hay método para la contraseña MD5 ni para activar la autenticación**
+  (`ENABLED_SERVER_AUTHENTICATE` sigue en 0). La autenticación NTP del servidor se hace a mano; no se crea herramienta.
+- **Pruebas en vivo de las herramientas nuevas (2026-10-22):** `pt_ui_open` abre por clic en el lienzo (PC1, ventana destruida) y por
+  `setVisible` (las ocultas), elige pestaña, sección y aplicación (IP Configuration, VLAN Database, FastEthernet0/0, SYSLOG…); `pt_ui_close` las oculta
+  todas; `pt_server_read` lee los 10 servicios; `pt_screenshot` y `pt_inspect_ports` correctos. Abrir una interfaz en la ventana de un router deja su
+  consola en `(config-if)#` (`pt_cli` ya sale con `end`).
+- **Capturas como la Herramienta Recortes:** `GetWindowRect` incluye el borde invisible de Windows 10/11 (7 px a los lados y abajo) que `PrintWindow`
+  pinta negro, y además deja 1 px negro más. Ahora se recorta al marco de `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` y se quitan las
+  líneas de borde negras (≥90 %). Comparada con una captura del usuario con Recortes: **100 % de píxeles idénticos** (pantalla a 96 DPI). La calidad
+  «peor» que veía era la vista previa del chat, que reduce la imagen. El proceso se declara DPI-aware (por si la pantalla está al 125 %).
+- **Syslog sí se ve en la ventana:** SRV1 → Config → SYSLOG enseña las entradas (hora, IP del equipo, mensaje). Sirve de lectura por captura.
+- **Aplicaciones del Desktop:** una aplicación abierta (IP Configuration, Command Prompt…) tapa los iconos; su X cambia de sitio según la aplicación
+  (IP Configuration 489,54; Command Prompt 610,94, coordenadas de ventana). Se localiza en la captura: barra azul puro 0000ff y caja de la X con borde
+  `d0d0d0` y fondo `fdfdfd`. `pt_ui_open` la cierra antes de abrir otra. Desktop del **servidor** (distinto del PC): IP Configuration, Command Prompt,
+  Traffic Generator, Text Editor, Web Browser (fila y≈140) y PPPoE Dialer, VPN (y≈285).
+- **Módulos del Switch-PT-Empty** (pestaña Physical): PT-SWITCH-NM-1CE, 1CFE, 1CGE, 1FFE, 1FGE; los tres nuevos se instalan por API
+  (`addModule("6", 4, "PT-SWITCH-NM-1CGE")` → GigabitEthernet6/1; 1CE → Ethernet7/1; 1FGE → GigabitEthernet8/1). Añadidos al catálogo.
+- **`addFtpUser` devuelve undefined aunque cree la cuenta** (igual que `addPool`): el resultado se comprueba con `isExistingUser`. Las cuentas salen
+  en el XML por orden alfabético.
+- **FTP desde un cliente (P3.2):** PC1 → `ftp 10.0.0.2` con `alumno` (permisos RL): `dir` lista los 17 archivos IOS del servidor y `delete` da
+  `550 … permission denied`. Los permisos creados por API funcionan.
+  - Las sesiones interactivas (ftp pide `Username:`/`Password:` con el prompt vacío) **no van con `pt_cli`**: al ver el prompt vacío manda un Enter
+    para «despertar» la consola y ese Enter se toma como usuario. Y si se mandan varias líneas seguidas, las que llegan antes de su prompt se pierden.
+    Hay que mandar una línea y esperar al prompt siguiente.
+- **Apéndice E1 (sobrecillo), solo lectura:** `ipc.appWindow().getUserCreatedPDU()` tiene `activateScenario`, `colorPDU`, `deletePDU`, `editPDU`,
+  `firePDU`, `setScenarioDescription`, `newScenarioBtn_clicked`, `deleteScenarioBtn_clicked`, `scenarioInfoBtn_clicked`, `toggleOpenListWindowBtn`…
+  **ninguno crea un PDU**. `getPDUListWindow()`: solo `setVisible`/`setDisabled`. `getSimulationPanel()`: `play`, `back`, `forward`, `isPlaying`,
+  `resetSimulation`, `changePlaySpeed`, `setConstantDelay`, `setFilter`, `setAllFilters`, `showFiltersDialog`. Camino posible (sin hacer): con los clics
+  que ya funcionan, elegir la herramienta *Add Simple PDU* de la barra derecha y hacer clic en el icono de origen y en el de destino; la lista de
+  PDU (abajo a la derecha de la ventana principal) enseña *Successful* y se captura con `pt_ui_capture`.
+- **`pt_cli` con `interactive=true`:** una línea cada vez, sin Enter de despertar, esperando a que la respuesta deje de cambiar (1 s) antes de la siguiente.
+- **¡OJO! Una aplicación del Desktop abierta pisa lo que cambia el MCP:** con *IP Configuration* de SRV1 abierta (enseñando gateway 10.0.0.1), se
+  cambió el gateway por API a 10.0.0.254 (el XML lo confirmaba); al cerrar la aplicación con su X y cambiar de pestaña, el XML volvió a **10.0.0.1**:
+  la aplicación escribe sus campos al cerrarse. Así se perdió antes el gateway de SRV1. *Config → Settings* no lo hace (refresca los valores al
+  enseñarse). Arreglo: `pt_ui_open` cierra la aplicación justo después de capturarla y `pt_ui_close` cierra la que haya abierta antes de ocultar la
+  ventana. Regla: **no cambiar IP/gateway/DNS por el MCP con una aplicación del Desktop de ese equipo abierta** (y avisar al usuario si la tiene él).
+- Pruebas en vivo tras recargar (11:16): `pt_server_ftp` (profe → creado) y `pt_server_email` (luis → creado, ana → ya existía) informan bien;
+  `pt_cli` con `interactive` hace la sesión ftp entera (usuario, clave, dir, quit) en una llamada; `pt_ui_open` cierra Command Prompt/IP Configuration
+  antes de abrir otra y abre las del Desktop del servidor; capturas sin bordes negros.

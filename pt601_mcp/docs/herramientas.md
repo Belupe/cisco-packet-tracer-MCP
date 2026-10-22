@@ -15,7 +15,8 @@ Todas devuelven texto. Un error se devuelve como `isError` con un mensaje en esp
 | `pt_add_note` | `text`, `x`, `y`, `size?` | Nota de texto en el mapa (IP encima de un servidor) |
 | `pt_list_notes` / `pt_remove_note` | — / `id` | Lista o borra notas del mapa |
 | `pt_remove_link` | `device`, `port` | Quita el cable de ese puerto |
-| `pt_add_module` | `device`, `slot`, `kind?` | Añade un puerto a un `Switch-PT-Empty`/`Router-PT-Empty` existente (`fastethernet`, `fiber`; en routers también `gigabit`, `serial`…) |
+| `pt_add_module` | `device`, `slot`, `kind?`, `count?` | Añade puertos a un `Switch-PT-Empty`/`Router-PT-Empty` existente (`fastethernet`, `fiber`; en routers también `gigabit`, `serial`…). `count` = varios en ranuras seguidas con un solo apagado |
+| `pt_inspect_ports` | `device`, `only_linked?` | Estado real de cada puerto (lo de *Config → INTERFACE*): encendido, línea/protocolo, luz, MAC, IP, velocidad, dúplex, MTU, descripción, modo y VLAN del switch, vecino del cable. Marca anomalías |
 | `pt_remove_module` | `device`, `slot` | Quita el módulo de una ranura (puerto sobrante de un `Switch-PT-Empty`) |
 | `pt_rename_device` | `name`, `new_name` | Cambia el nombre; falla si el nuevo ya existe |
 | `pt_running_config` | `device` | Running-config completa de un router o switch (interfaces, rutas…), sin el `--More--` de la consola |
@@ -45,13 +46,17 @@ Para `serial`/`console` hay que indicar los puertos.
 | Herramienta | Parámetros | Notas |
 |---|---|---|
 | `pt_set_ip` | `device`, `ip`, `mask`, `gateway?`, `port?`, `dhcp?` | Para PC/servidor/portátil. Puerto por defecto `FastEthernet0` |
-| `pt_cli` | `device`, `commands[]`, `answer_initial_dialog?` | Comandos tal cual; devuelve la salida nueva. Responde `no` al diálogo inicial del router |
+| `pt_cli` | `device`, `commands[]`, `answer_initial_dialog?`, `interactive?`, `wait_seconds?` | Comandos tal cual; devuelve la salida nueva. Responde `no` al diálogo inicial del router. **No hace `enable` solo.** `interactive: true` = una línea cada vez esperando la respuesta (ftp/telnet desde un PC: `["ftp 10.0.0.2", "usuario", "clave", "dir", "quit"]`) |
 | `pt_config` | `device`, `config`, `save?` | Texto IOS multilínea; añade `enable`/`configure terminal`/`end`. `save` = `write memory` |
 | `pt_router_config` | `device`, `spec`, `save?` | Ver esquema abajo |
 | `pt_switch_config` | `device`, `spec`, `save?` | Ver esquema abajo |
-| `pt_dhcp_server` | `device`, `start_ip`, `mask`, `pool?`, `gateway?`, `dns?`, `max_users?`, `tftp?` | Servicio DHCP de un Server-PT |
+| `pt_dhcp_server` | `device`, `start_ip`, `mask`, `pool?`, `gateway?`, `dns?`, `max_users?`, `tftp?` | Servicio DHCP de un Server-PT: red y máscara del pool (de `start_ip` y `mask`), rango, gateway y DNS. `pool` por defecto `serverPool`; otro nombre crea un pool **nuevo** (otra red que llega por `ip helper`). `tftp` no se puede fijar |
 | `pt_vpn_ipsec` | `device`, `spec`, `save?` | Un extremo de una VPN IPsec sitio a sitio (router 2811): `spec={wan_port, peer, key, local[], remote[]}` |
 | `pt_dns_server` | `device`, `records[{name, ip}]` | Servicio DNS de un Server-PT |
+| `pt_set_port` | `device`, `port`, campos, `dry_run?`, `save?` | Cambia un puerto. **Por API** (comprobado que llega al running-config): `description`, `power`, `speed` (`auto`/10/100/1000), `duplex` (`auto`/`full`/`half`), `mtu`, `mac` (`0011.2233.4455`), `cdp`, `proxy_arp`. **Por IOS** (la API no aplica el troncal): `mode` (`access`/`trunk`), `vlan`, `native_vlan`, `allowed_vlans[]`, `port_security{maximum, violation, sticky, macs[]}`, `ip_bandwidth`, `ip_delay`, `clock_rate`, `ospf{cost, priority, hello, dead, auth_key, md5_key_id, md5_key}` |
+| `pt_server_read` | `device` | Lee todo *Config → SERVICES* de un Server-PT desde su XML: servicios encendidos, **registros DNS (nombre, tipo, IP, TTL)**, pools DHCP, cuentas FTP, correo, NTP, AAA |
+| `pt_server_ftp` | `device`, `users[{name, password, permissions?}]` | Cuentas FTP (`permissions` con letras `RWDNL`, por defecto todas) |
+| `pt_server_email` | `device`, `domain?`, `users[{name, password}]?` | Dominio del correo y cuentas (encender SMTP/POP3 con `pt_server_services`) |
 | `pt_server_services` | `device`, `services[]` | Deja encendidos SOLO esos servicios (`dhcp`, `dns`, `http`, `https`, `tftp`, `ftp`, `smtp`, `pop3`, `ntp`, `syslog`, `email`) y apaga el resto. En planes: `"services": ["dhcp"]` dentro de `servers[]` |
 
 ### `spec` de `pt_router_config`
@@ -93,6 +98,15 @@ Las máscaras se validan; las redes OSPF/EIGRP aceptan `mask` (el wildcard se ca
 | Herramienta | Parámetros | Notas |
 |---|---|---|
 | `pt_ping` | `device`, `target`, `wait_seconds?` | Espera a las estadísticas. Los primeros paquetes pueden perderse (ARP/STP) |
+
+## Capturas y ventanas (para la documentación de las prácticas)
+Las imágenes se guardan en `capturas/` (raíz del proyecto, no se sube a git) y la herramienta las devuelve también como imagen.
+| Herramienta | Parámetros | Notas |
+|---|---|---|
+| `pt_screenshot` | `filename?` | El mapa entero (`getWorkspaceImage`), aunque no quepa en pantalla |
+| `pt_ui_open` | `device`, `tab?`, `section?`, `app?`, `filename?` | Abre la ventana de un equipo **sin mover el ratón** (clic enviado sobre su icono; antes Esc para dejar activa *Select*), elige pestaña (`physical`, `config`, `cli`, `desktop`, `custom interface`), sección de *Config* (`Settings`, `VLAN Database`, `Static`, `RIP`, `HTTP`, `DNS`, `EMAIL`, `FastEthernet0/1`…) o aplicación del *Desktop* de un PC (`ip configuration`, `command prompt`, `web browser`…) y devuelve su captura. El mapa debe estar al 100 % de zoom y el equipo (u otro) a la vista |
+| `pt_ui_capture` | `device?`, `filename?` | Captura la ventana abierta de un equipo o, sin `device`, la ventana principal |
+| `pt_ui_close` | `device?` | Oculta la ventana (o todas). No la destruye: `pt_ui_open` la vuelve a enseñar al momento |
 
 ## Avanzado
 | Herramienta | Parámetros | Notas |

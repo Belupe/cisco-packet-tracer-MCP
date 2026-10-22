@@ -56,8 +56,11 @@ EMPTY_MODULES = {
 
 
 # Modulos sueltos comprobados en la 6.0.1 real: modelo de equipo -> (tipo de modulo, {alias: modelo de modulo}).
+# Lista completa de la pestana Physical (2026-10-22). Switch: 1CE, 1CFE, 1CGE, 1FFE, 1FGE (todos instalados por API: Ethernet7/1,
+# GigabitEthernet6/1...). Router: 1AM, 1CE, 1CFE, 1CGE, 1FFE, 1FGE, 1S, 1SS (1SS sin instalar por API).
 MODULES = {
-    "Switch-PT-Empty": (4, {"fastethernet": "PT-SWITCH-NM-1CFE", "fiber": "PT-SWITCH-NM-1FFE"}),
+    "Switch-PT-Empty": (4, {"fastethernet": "PT-SWITCH-NM-1CFE", "fiber": "PT-SWITCH-NM-1FFE",
+                            "gigabit": "PT-SWITCH-NM-1CGE", "gigabit-fiber": "PT-SWITCH-NM-1FGE", "ethernet": "PT-SWITCH-NM-1CE"}),
     "Router-PT-Empty": (3, {"fastethernet": "PT-ROUTER-NM-1CFE", "fiber": "PT-ROUTER-NM-1FFE",
                             "gigabit": "PT-ROUTER-NM-1CGE", "gigabit-fiber": "PT-ROUTER-NM-1FGE",
                             "serial": "PT-ROUTER-NM-1S", "ethernet": "PT-ROUTER-NM-1CE", "modem": "PT-ROUTER-NM-1AM"}),
@@ -108,4 +111,8 @@ def catalog_text():
         lines.append("%s | %s (%d) | %s" % (m, kind, DEVICE_TYPES[kind], "si" if ok else "no"))
     lines.append("")
     lines.append("cables: " + ", ".join("%s=%d" % kv for kv in sorted(CABLES.items(), key=lambda kv: kv[1])))
+    lines.append("")
+    lines.append("modulos (pt_add_module kind=...):")
+    for model in sorted(MODULES):
+        lines.append("  %s: %s" % (model, ", ".join("%s=%s" % kv for kv in sorted(MODULES[model][1].items()))))
     return "\n".join(lines)

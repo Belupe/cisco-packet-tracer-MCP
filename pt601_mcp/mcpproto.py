@@ -1,4 +1,5 @@
 """Protocolo MCP minimo sobre stdio (JSON por lineas), solo biblioteca estandar."""
+import base64
 import json
 
 from . import __version__
@@ -34,8 +35,12 @@ class McpServer:
         if method == "tools/call":
             params = msg.get("params") or {}
             try:
-                text = self.tools.call(params.get("name"), params.get("arguments"))
-                return self._ok(mid, {"content": [{"type": "text", "text": str(text)}], "isError": False})
+                result = self.tools.call(params.get("name"), params.get("arguments"))
+                content = [{"type": "text", "text": str(result)}]
+                for png in getattr(result, "images", ()):
+                    content.append({"type": "image", "mimeType": "image/png",
+                                    "data": base64.b64encode(png).decode("ascii")})
+                return self._ok(mid, {"content": content, "isError": False})
             except ToolError as exc:
                 return self._ok(mid, {"content": [{"type": "text", "text": str(exc)}], "isError": True})
             except Exception as exc:  # noqa: BLE001 - nunca tumbar el servidor

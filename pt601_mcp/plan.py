@@ -159,6 +159,8 @@ def class_plan(spec):
             "servers": [{"name": "HTTP", "ip": "172.26.1.3"}, {"name": "DNS", "ip": "172.26.1.2"}],
             "sites": [{"name": "SW-Goya", "pcs": 3, "laptops": 2}, ...],        # en el orden del enunciado
             "hosts_dhcp": false, "first_host": 10, "notes": true}
+    Con "hosts_dhcp": true los equipos conservan el nombre de fabrica (PC0, Laptop0...; "first_pc"/"first_laptop" si el
+    archivo ya tiene equipos) y no se numeran por IP.
     Opcionales: "mask", "gateway", "dns" (por defecto la IP del servidor llamado DNS, si lo hay) y, por servidor,
     "services": [...] y "dhcp": {...} SOLO si el enunciado pide configurar ese servicio.
     """
@@ -183,6 +185,9 @@ def class_plan(spec):
         dns = next((s["ip"] for s in servers if str(s.get("name", "")).upper().startswith("DNS")), "")
     L = CLASS_LAYOUT
     dhcp = bool(spec.get("hosts_dhcp"))
+    # Con DHCP los equipos NO se renombran (regla del usuario, 2026-10-06): se quedan con el nombre que les da PT
+    # al crearlos (PC0, PC1..., Laptop0...). Solo con IP estatica el nombre es el ultimo octeto.
+    auto_n = {"PC": int(spec.get("first_pc") or 0), "Laptop": int(spec.get("first_laptop") or 0)}
     devices, links, hosts, plan_servers, notes = [], [], [], [], []
 
     site_ys = [L["site_y0"] + i * L["site_dy"] for i in range(len(sites))]
@@ -228,16 +233,22 @@ def class_plan(spec):
                                       ("laptops", "Laptop-PT", laps, sy + L["row_down"])):
             for col in range(count):                     # de izquierda a derecha: puertos seguidos
                 n = numbers[(si, kind, col)]
-                devices.append({"name": str(n), "model": model, "x": L["site_x"] + L["host_x0"] + col * L["host_dx"], "y": y})
-                links.append({"a": sname, "port_a": "FastEthernet%d/1" % port, "b": str(n), "port_b": "FastEthernet0",
+                hname = str(n)
+                if dhcp:                                 # nombre de fabrica, en el orden en que se crean
+                    base = model.split("-")[0]
+                    hname = "%s%d" % (base, auto_n[base])
+                    auto_n[base] += 1
+                devices.append({"name": hname, "model": model, "x": L["site_x"] + L["host_x0"] + col * L["host_dx"], "y": y})
+                links.append({"a": sname, "port_a": "FastEthernet%d/1" % port, "b": hname, "port_b": "FastEthernet0",
                               "cable": "straight"})
                 port += 1
-                host = {"device": str(n), "dhcp": True} if dhcp else \
-                    {"device": str(n), "ip": "%s.%d" % (prefix, n), "mask": mask, "gateway": gateway}
+                host = {"device": hname, "dhcp": True} if dhcp else \
+                    {"device": hname, "ip": "%s.%d" % (prefix, n), "mask": mask, "gateway": gateway}
                 if dns and not dhcp:
                     host["dns"] = dns
                 hosts.append(host)
-    hosts.sort(key=lambda h: int(h["device"]))            # con DHCP, pedir IP en orden de nombre
+    if not dhcp:
+        hosts.sort(key=lambda h: int(h["device"]))
     plan = {"devices": devices, "links": links, "hosts": hosts, "servers": plan_servers}
     if notes:
         plan["notes"] = notes

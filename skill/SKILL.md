@@ -18,7 +18,14 @@ No uses nombres de métodos, modelos o puertos de memoria: usa las herramientas 
 5. Resume al usuario qué creaste (nombres, IPs, VLANs) y cualquier paso que diera `ERR`.
 
 ## Herramientas
-- Consulta: `pt_status`, `pt_catalog`, `pt_list_devices`, `pt_list_ports`, `pt_read_output`, `pt_describe`, `pt_snapshot` (red entera: posiciones, IPs, cables, servicios)
+- Consulta: `pt_status`, `pt_catalog`, `pt_list_devices`, `pt_list_ports`, `pt_read_output`, `pt_describe`, `pt_snapshot` (red entera: posiciones, IPs, cables, servicios),
+  `pt_inspect_ports` (estado real de cada puerto y anomalías), `pt_server_read` (todo *Config → SERVICES*: registros DNS con TTL, FTP, correo…)
+- Puertos y servicios: `pt_set_port` (un puerto: descripción, encendido, velocidad, dúplex, MAC; modo access/trunk, VLAN y port-security por IOS),
+  `pt_server_ftp`, `pt_server_email`, `pt_add_module` con `count`
+- Capturas (para documentar): `pt_screenshot` (mapa), `pt_ui_open` (ventana de un equipo en la pestaña/sección pedida, con captura),
+  `pt_ui_capture`, `pt_ui_close`. Se guardan en `capturas/`. Necesitan el mapa al 100 % de zoom.
+  **Ojo:** una aplicación del Desktop abierta (IP Configuration…) escribe sus valores al cerrarse y pisa lo que haya cambiado el MCP. Las
+  herramientas ya la cierran tras capturar; si el usuario tiene una abierta en un equipo, pídele que la cierre antes de cambiarle la IP
 - Construcción: `pt_build_topology`, `pt_add_device`, `pt_connect` (puertos libres automáticos), `pt_add_link`, `pt_move_device`, `pt_remove_device`, `pt_clear_workspace` (exige `confirm`)
 - Configuración: `pt_set_ip`, `pt_router_config`, `pt_switch_config`, `pt_config` (IOS libre), `pt_cli`, `pt_dhcp_server`, `pt_dns_server`
 - Pruebas: `pt_ping`

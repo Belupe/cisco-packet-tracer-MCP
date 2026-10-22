@@ -253,7 +253,7 @@ class ToolTests(unittest.TestCase):
         fb = FakeBridge(["Router-PT-Empty", "OK puerto nuevo: FastEthernet2/0"])
         out = Tools(fb).call("pt_add_module", {"device": "R1", "slot": 2, "kind": "fiber"})
         self.assertIn("FastEthernet2/0", out)
-        self.assertIn('d.addModule("2", 3, "PT-ROUTER-NM-1FFE")', fb.sent[1])
+        self.assertIn('for (var s = 2; s < 3; s++) { if (!d.addModule(String(s), 3, "PT-ROUTER-NM-1FFE"))', fb.sent[1])
         self.assertLess(fb.sent[1].index("addModule"), fb.sent[1].index("skipBoot"))   # si no, arranca en tiempo real
         with self.assertRaises(ToolError):
             Tools(FakeBridge(["Switch-PT-Empty"])).call("pt_add_module", {"device": "S", "slot": 1, "kind": "serial"})

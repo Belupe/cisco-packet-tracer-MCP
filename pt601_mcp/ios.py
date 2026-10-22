@@ -202,3 +202,93 @@ def switch_config(spec):
             lines.append("ip default-gateway %s" % check_ip(svi["gateway"], "gateway"))
     lines += [str(x) for x in spec.get("extra", [])]
     return _wrap(lines)
+
+
+PORT_SECURITY_VIOLATIONS = ("shutdown", "restrict", "protect")
+
+
+def port_config(port, spec):
+    """Comandos IOS de UN puerto (lo que la API de la 6.0.1 no aplica bien o no tiene).
+    Switch: mode access|trunk, vlan, native_vlan, allowed_vlans, port_security{maximum, violation, sticky, macs}.
+    Router: ip_bandwidth (kbps), ip_delay (decenas de us), clock_rate, ospf{cost, priority, hello, dead, auth_key, md5_key_id, md5_key}.
+    Probados en la 6.0.1 el 2026-10-22 (ningun '% Invalid input')."""
+    lines = []
+    mode = spec.get("mode")
+    if mode is not None and mode not in ("access", "trunk"):
+        raise ConfigError("mode debe ser access o trunk")
+    if mode:
+        lines.append("switchport mode %s" % mode)
+    if spec.get("vlan") is not None:
+        lines.append("switchport access vlan %d" % _vlan(spec["vlan"]))
+    if spec.get("native_vlan") is not None:
+        lines.append("switchport trunk native vlan %d" % _vlan(spec["native_vlan"]))
+    if spec.get("allowed_vlans"):
+        lines.append("switchport trunk allowed vlan %s" % ",".join(str(_vlan(v)) for v in spec["allowed_vlans"]))
+    ps = spec.get("port_security")
+    if ps:
+        if mode != "access" and "switchport mode access" not in lines:
+            lines.append("switchport mode access")       # el IOS no admite port-security en un puerto dinamico
+        lines.append("switchport port-security")
+        if ps.get("maximum") is not None:
+            lines.append("switchport port-security maximum %d" % _positive(ps["maximum"], "maximum"))
+        if ps.get("violation"):
+            if ps["violation"] not in PORT_SECURITY_VIOLATIONS:
+                raise ConfigError("violation debe ser %s" % ", ".join(PORT_SECURITY_VIOLATIONS))
+            lines.append("switchport port-security violation %s" % ps["violation"])
+        if ps.get("sticky"):
+            lines.append("switchport port-security mac-address sticky")
+        for mac in ps.get("macs", []):
+            lines.append("switchport port-security mac-address %s" % check_mac(mac))
+    if spec.get("ip_bandwidth") is not None:
+        lines.append("bandwidth %d" % _positive(spec["ip_bandwidth"], "ip_bandwidth"))
+    if spec.get("ip_delay") is not None:
+        lines.append("delay %d" % _positive(spec["ip_delay"], "ip_delay"))
+    if spec.get("clock_rate") is not None:
+        lines.append("clock rate %d" % _positive(spec["clock_rate"], "clock_rate"))
+    ospf = spec.get("ospf") or {}
+    for key, cmd in (("cost", "ip ospf cost"), ("priority", "ip ospf priority"),
+                     ("hello", "ip ospf hello-interval"), ("dead", "ip ospf dead-interval")):
+        if ospf.get(key) is not None:
+            value = int(ospf[key])
+            if value < (0 if key == "priority" else 1):
+                raise ConfigError("ospf.%s fuera de rango: %r" % (key, ospf[key]))
+            lines.append("%s %d" % (cmd, value))
+    if ospf.get("auth_key"):
+        lines.append("ip ospf authentication-key %s" % _word(ospf["auth_key"], "ospf.auth_key"))
+    if ospf.get("md5_key"):
+        lines.append("ip ospf message-digest-key %d md5 %s" % (_positive(ospf.get("md5_key_id", 1), "ospf.md5_key_id"),
+                                                               _word(ospf["md5_key"], "ospf.md5_key")))
+    if not lines:
+        return []
+    return _wrap(["interface %s" % port] + lines)
+
+
+def _vlan(value):
+    v = int(value)
+    if not 1 <= v <= 4094:
+        raise ConfigError("VLAN fuera de rango (1-4094): %r" % (value,))
+    return v
+
+
+def _positive(value, what):
+    if isinstance(value, bool):
+        raise ConfigError("%s debe ser un numero" % what)
+    v = int(value)
+    if v < 1:
+        raise ConfigError("%s debe ser mayor que 0" % what)
+    return v
+
+
+def _word(value, what):
+    text = str(value).strip()
+    if not text or any(c.isspace() for c in text):
+        raise ConfigError("%s no puede estar vacio ni tener espacios" % what)
+    return text
+
+
+def check_mac(value):
+    text = str(value).strip()
+    parts = text.split(".")
+    if len(parts) != 3 or not all(len(x) == 4 and all(c in "0123456789abcdefABCDEF" for c in x) for x in parts):
+        raise ConfigError("MAC invalida: %r (formato Cisco: 0011.2233.4455)" % (value,))
+    return text.upper()

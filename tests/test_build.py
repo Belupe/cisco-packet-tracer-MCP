@@ -95,8 +95,17 @@ class ClassPlanTests(unittest.TestCase):
             "servers": [{"name": "Server DHCP", "ip": "192.168.1.3", "services": ["dhcp"],
                          "dhcp": {"start_ip": "192.168.1.10", "mask": "255.255.255.0", "gateway": "192.168.1.1"}}],
             "sites": [{"name": "SW-Madrid", "pcs": 3, "laptops": 4}, {"name": "SW-Cadiz", "pcs": 3, "laptops": 1}]})
-        self.assertEqual([h["device"] for h in plan["hosts"]], [str(n) for n in range(10, 21)])  # renovar en orden
+        # Regla del usuario (2026-10-06): con DHCP los equipos NO se renombran por IP; conservan el nombre de fabrica
+        # de PT (PC0..., Laptop0...) en el orden de creacion. Solo con IP estatica el nombre es el ultimo octeto.
+        names = [h["device"] for h in plan["hosts"]]
+        self.assertEqual(sorted(names), sorted(["PC%d" % i for i in range(6)] + ["Laptop%d" % i for i in range(5)]))
         self.assertTrue(all(h == {"device": h["device"], "dhcp": True} for h in plan["hosts"]))
+        model = {d["name"]: d["model"] for d in plan["devices"]}
+        self.assertEqual(model["PC0"], "PC-PT")
+        self.assertEqual(model["Laptop4"], "Laptop-PT")
+        link = {(l["a"], l["port_a"]): l["b"] for l in plan["links"]}
+        self.assertEqual(link[("SW-Madrid", "FastEthernet1/1")], "PC0")       # primer equipo creado
+        self.assertEqual(link[("SW-Cadiz", "FastEthernet4/1")], "Laptop4")    # el ultimo portatil
         self.assertEqual(plan["servers"][0]["services"], ["dhcp"])
         self.assertEqual(plan["servers"][0]["mask"], "255.255.255.0")
         self.assertNotIn("dns_server", plan["servers"][0])
@@ -357,24 +366,37 @@ class BuildTests(unittest.TestCase):
         self.assertIn('getProcess("DhcpServer")', joined)
         self.assertNotIn("addNewPool", joined)               # no existe en la 6.0.1
         self.assertIn("setDhcpClientFlag(true)", joined)
-        self.assertEqual(len([l for l in labels if "DHCP renovar" in l]), 5)   # 3 PCs + 2 portatiles
         self.assertIn('enterCommand("ipconfig /renew")', joined)
-        self.assertLess(idx["DHCP en"], next(i for i, l in enumerate(labels) if "DHCP renovar" in l))
+        # Caso real (Practica 2B): con DHCP de servidor se mandaba un unico renew a cada equipo nada mas cablear, el
+        # puerto del switch aun no reenviaba y los 19 se quedaron en "DHCP request failed". Ahora se activan al final,
+        # de uno en uno y esperando la IP (como con DHCP de router).
+        clients = [l for l in labels if re.match(r"OK  DHCP (PC|LAP)\d", l)]
+        self.assertEqual(len(clients), 5)                                      # 3 PCs + 2 portatiles
+        self.assertFalse([l for l in labels if "DHCP renovar" in l or re.match(r"OK  IP (PC|LAP)\d", l)])
+        self.assertLess(idx["DHCP en"], labels.index(clients[0]))
+        self.assertIn("getIpAddress()", joined)                                # espera a ver la IP antes de seguir
 
     def test_dhcp_server_uses_real_601_api(self):
         # Comprobado en una 6.0.1.0011 real: proceso "DhcpServer", pool por defecto con setStartIp/setEndIp/
-        # setDefaultRouter/setDnsServerIp. setNetworkMask("...") da 'Invalid arguments' y cuelga el motor.
+        # setDefaultRouter/setDnsServerIp. setNetworkMask necesita DOS argumentos (red, mascara): con uno da
+        # 'Invalid arguments' y cuelga el motor; y pone el rango a la red entera, asi que va antes que el inicio.
         sb = ScriptBridge()
         Tools(sb).call("pt_dhcp_server", {"device": "S", "start_ip": "192.168.1.100", "mask": "255.255.255.0",
                                            "gateway": "192.168.1.1", "dns": "192.168.1.3", "max_users": 100})
         js = sb.sent[0]
         self.assertIn('getProcess("DhcpServer")', js)
+        self.assertIn('var pool = find("serverPool")', js)
+        self.assertIn('pool.setNetworkMask("192.168.1.0", "255.255.255.0")', js)
+        self.assertLess(js.index("setNetworkMask"), js.index("setStartIp"))
         self.assertIn('pool.setStartIp("192.168.1.100")', js)
         self.assertIn('pool.setEndIp("192.168.1.199")', js)       # inicio + 100 usuarios - 1
         self.assertIn('pool.setDefaultRouter("192.168.1.1")', js)
         self.assertIn('pool.setDnsServerIp("192.168.1.3")', js)
-        self.assertNotIn("setNetworkMask", js)
         self.assertNotIn("addNewPool", js)
+        Tools(sb).call("pt_dhcp_server", {"device": "S", "pool": "SEDE2", "start_ip": "10.0.2.10", "mask": "255.255.255.0"})
+        self.assertIn('proc.addPool("SEDE2")', sb.sent[1])
+        with self.assertRaises(ToolError):
+            Tools(sb).call("pt_dhcp_server", {"device": "S", "pool": "con espacio", "start_ip": "10.0.2.10", "mask": "255.255.255.0"})
         with self.assertRaises(ToolError):                         # se sale de la /24
             Tools(sb).call("pt_dhcp_server", {"device": "S", "start_ip": "192.168.1.200", "mask": "255.255.255.0",
                                                "max_users": 100})

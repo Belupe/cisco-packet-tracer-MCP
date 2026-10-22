@@ -8,7 +8,7 @@ Lee `GUIA_COMPLETA.md` (arquitectura y mapa de confianza) y `NOTAS.md` (diario t
 cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valores por defecto. Donde ponga `PENDIENTE`, pregunta; no inventes.
 
 ## Estructura
-- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (40 herramientas),
+- `pt601_mcp/` — el producto: `bridge.py` (HTTP + token), `mcpproto.py` (MCP por stdio), `tools.py` (49 herramientas), `winui.py` (capturas y clics en ventanas de Windows),
   `jsgen.py` (JavaScript para PT), `ios.py` (comandos IOS), `plan.py` (planes JSON), `catalog.py` (modelos/cables),
   `extension/` (panel + script engine que se pegan/cargan en PT).
 - `tests/` — pruebas sin PT: `python3 -m unittest discover -s tests -v` (o con el python portátil del usuario).
@@ -30,9 +30,10 @@ cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valo
 8. **Aprender de los trabajos del usuario sin pedir permiso** (decisión suya, 2026-10-03): abre el `.pkt` con `pt_snapshot`, compara con el
    enunciado y **anota directamente** en `reglas.md` lo que deduzcas (y cambia el código que haga falta, con su prueba). Después dile qué has
    anotado; él corrige la redacción si quiere. No le pidas «¿confirmas?».
-   **Forma de trabajo acordada:** al principio el usuario hace la práctica él mismo en PT, con el Word del enunciado delante, y el asistente
-   va mirando (`pt_snapshot` al empezar y cada vez que avise o termine un paso) para anotar los **patrones que se repiten**, no para copiar
-   el ejercicio. Con el tiempo irá delegando prácticas enteras.
+   **Forma de trabajo acordada (actualizada 2026-10-06):** el usuario **delega en el asistente todas las actividades de Cisco**: deja el
+   enunciado (Word) en `Ejercicios/` y el asistente la construye entera en PT siguiendo `reglas.md`, la verifica y le cuenta qué decisiones
+   tomó. La **documentación** de las prácticas la hace el usuario a mano; no generarla salvo que la pida.
+   Antes (hasta el 2026-10-05) el usuario hacía la práctica y el asistente miraba con `pt_snapshot` para anotar los patrones que se repiten.
    **Ojo:** solo son fuente de reglas las prácticas de este curso. Si el usuario abre un archivo «para mejorarte» (de otro año, de prueba…),
    úsalo para probar y mejorar las herramientas y anota lo técnico en `NOTAS.md`, pero **no** lo conviertas en reglas.
 9. `ejemplos/` contiene enunciados y trabajos de clase: está en `.gitignore`, **no se sube** y se borra al terminar.

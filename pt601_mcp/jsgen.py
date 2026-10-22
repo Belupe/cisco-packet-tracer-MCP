@@ -128,16 +128,20 @@ def remove_module(name, slot):
         ' return "OK puertos: " + n0 + " -> " + d.getPortCount();' % (q(int(slot)), q(int(slot)), q(name)))
 
 
-def add_module(name, slot, mtype, model):
-    """Anade un modulo a un equipo que ya existe (firma real: addModule("<ranura>", tipo, modelo), apagado)."""
+def add_module(name, slot, mtype, model, count=1):
+    """Anade `count` modulos en ranuras seguidas desde `slot` a un equipo que ya existe, con UN solo apagado y encendido
+    (firma real: addModule("<ranura>", tipo, modelo), apagado). Si una ranura falla, para ahi y lo dice."""
     return wrap(
         get_dev("d", name) +
         ' var before = {}; for (var i = 0; i < d.getPortCount(); i++) { before[d.getPortAt(i).getName()] = 1; }'
-        ' d.setPower(false); var r = d.addModule(%s, %d, %s); d.setPower(true); try { d.skipBoot(); } catch (e9) {}'
-        ' if (!r) { return "ERROR: PT no acepto el modulo " + %s + " en la ranura " + %s + " de " + %s + " (ranura ocupada o modelo de otro tipo de equipo)"; }'
+        ' d.setPower(false); var bad = -1;'
+        ' for (var s = %d; s < %d; s++) { if (!d.addModule(String(s), %d, %s)) { bad = s; break; } }'
+        ' d.setPower(true); try { d.skipBoot(); } catch (e9) {}'
         ' var neu = []; for (var j = 0; j < d.getPortCount(); j++) { var n = d.getPortAt(j).getName(); if (!before[n]) { neu.push(n); } }'
-        ' return "OK puerto nuevo: " + neu.join(", ");'
-        % (q(int(slot)), int(mtype), q(model), q(model), q(int(slot)), q(name)))
+        ' if (bad >= 0) { return "ERROR: PT no acepto el modulo " + %s + " en la ranura " + bad + " de " + %s'
+        ' + " (ranura ocupada o modelo de otro tipo de equipo). Puertos nuevos antes del fallo: " + (neu.join(", ") || "ninguno"); }'
+        ' return "OK puerto" + (neu.length > 1 ? "s nuevos: " : " nuevo: ") + neu.join(", ");'
+        % (int(slot), int(slot) + int(count), int(mtype), q(model), q(model), q(name)))
 
 
 def set_ip(name, port, ip, mask, gateway, dhcp, dns=None):
@@ -382,12 +386,13 @@ def _attempt(label, expr):
             % (expr, q(label), q(label)))
 
 
-def dhcp_server(name, gateway, dns, start_ip, end_ip, mask):
-    """DHCP de un Server-PT en la 6.0.1 real: el proceso se llama "DhcpServer" (no DhcpServerMain) y trae un pool
-    por defecto ("serverPool") con setStartIp/setEndIp/setDefaultRouter/setDnsServerIp. No existe addNewPool y
-    setNetworkMask("255.255.255.0") da 'Invalid arguments' (y con Debug abierta cuelga el motor): no se llama; se
-    comprueba que la mascara pedida coincida con la del pool."""
-    sets = ["pool.setStartIp(%s);" % q(start_ip), "pool.setEndIp(%s);" % q(end_ip)]
+def dhcp_server(name, gateway, dns, start_ip, end_ip, mask, network, pool_name="serverPool"):
+    """DHCP de un Server-PT en la 6.0.1 real (comprobado el 2026-10-22): proceso "DhcpServer"; pool por defecto "serverPool";
+    addPool("<nombre>") crea otro; el pool tiene setNetworkMask(red, mascara) -CON DOS ARGUMENTOS: con uno da 'Invalid
+    arguments'- y setStartIp/setEndIp/setDefaultRouter/setDnsServerIp. setNetworkMask pone el rango a la red entera, asi que va
+    ANTES que el inicio y el final. El pool se busca por nombre recorriendo getPoolAt (la firma de getPool no esta comprobada)."""
+    sets = ["pool.setNetworkMask(%s, %s);" % (q(network), q(mask)),
+            "pool.setStartIp(%s);" % q(start_ip), "pool.setEndIp(%s);" % q(end_ip)]
     if gateway:
         sets.append("pool.setDefaultRouter(%s);" % q(gateway))
     if dns:
@@ -396,14 +401,14 @@ def dhcp_server(name, gateway, dns, start_ip, end_ip, mask):
         get_dev("d", name) +
         ' var proc = null; try { proc = d.getProcess("DhcpServer"); } catch (e0) { proc = null; }'
         ' if (!proc) { return "ERROR: " + %s + " no tiene el servicio DhcpServer (es un Server-PT?)"; }'
-        ' if (proc.getPoolCount() < 1) { return "ERROR: el servicio DHCP de " + %s + " no tiene ningun pool"; }'
+        ' function find(n) { for (var i = 0; i < proc.getPoolCount(); i++) { if (String(proc.getPoolAt(i).getDhcpPoolName()) == n) { return proc.getPoolAt(i); } } return null; }'
+        ' var pool = find(%s); var created = false; if (!pool) { proc.addPool(%s); pool = find(%s); created = true; }'
+        ' if (!pool) { return "ERROR: PT no creo el pool " + %s; }'
         ' proc.setEnable(true);'
-        ' var pool = proc.getPoolAt(0);'
-        ' if (String(pool.getSubnetMask()) != %s) { return "ERROR: la 6.0.1 no permite cambiar la mascara del pool (es " + pool.getSubnetMask() + ", pedida " + %s + ")"; }'
         ' %s'
-        ' return "OK pool " + pool.getDhcpPoolName() + ": " + pool.getStartIp() + " - " + pool.getEndIp() + " mascara " + pool.getSubnetMask()'
-        ' + " router " + pool.getDefaultRouter() + " dns " + pool.getDnsServerIp();'
-        % (q(name), q(name), q(mask), q(mask), " ".join(sets)))
+        ' return "OK pool " + pool.getDhcpPoolName() + (created ? " (nuevo)" : "") + ": red " + pool.getNetworkAddress() + " mascara " + pool.getSubnetMask()'
+        ' + ", " + pool.getStartIp() + " - " + pool.getEndIp() + " router " + pool.getDefaultRouter() + " dns " + pool.getDnsServerIp();'
+        % (q(name), q(pool_name), q(pool_name), q(pool_name), q(pool_name), " ".join(sets)))
 
 
 def dns_server(name, records):
@@ -504,3 +509,136 @@ def clear_workspace():
         'var names = []; for (var i = 0; i < net.getDeviceCount(); i++) { names.push(net.getDeviceAt(i).getName()); }'
         ' var n = 0; for (var j = 0; j < names.length; j++) { var guard = 0; while (guard < 10 && lw.removeDevice(names[j])) { n++; guard++; } }'
         ' return String(n) + " borrados, quedan " + net.getDeviceCount();')
+
+
+def workspace_image(fmt):
+    """Imagen del mapa. En la 6.0.1 getWorkspaceImage(fmt) devuelve un Array de bytes CON SIGNO (un PNG empieza por
+    -119,80,78...). Se pasa a base64 aqui dentro: ocupa 1/4 que el texto con comas y cabe mas en el limite de 1 MB del puente."""
+    return wrap(
+        'var b = lw.getWorkspaceImage(%s); if (!b || !b.length) { return "ERROR: PT no devolvio la imagen del mapa"; }'
+        ' var A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"; var n = b.length; var s = [];'
+        ' for (var i = 0; i < n; i += 3) { var c0 = b[i] & 255; var c1 = i + 1 < n ? b[i + 1] & 255 : 0; var c2 = i + 2 < n ? b[i + 2] & 255 : 0;'
+        ' s.push(A.charAt(c0 >> 2) + A.charAt(((c0 & 3) << 4) | (c1 >> 4))'
+        ' + (i + 1 < n ? A.charAt(((c1 & 15) << 2) | (c2 >> 6)) : "=") + (i + 2 < n ? A.charAt(c2 & 63) : "=")); }'
+        ' return s.join("");' % q(fmt))
+
+
+# Campos de puerto que se leen (todos comprobados en la 6.0.1 el 2026-10-22; cada tipo de equipo tiene solo una parte,
+# por eso se pregunta typeof antes de llamar). NO usar getOtherPort ni getPortSecurity: una prueba con ellos colgo el motor.
+PORT_FIELDS = ["getPower", "isPortUp", "isProtocolUp", "getLightStatus", "getMacAddress", "getIpAddress", "getSubnetMask",
+               "isDhcpClientOn", "getBandwidth", "isBandwidthAutoNegotiate", "isFullDuplex", "isDuplexAutoNegotiate",
+               "getMtu", "getDelay", "getDescription", "isCdpEnable", "getNatMode", "getAclInID", "getAclOutID",
+               "getAdminOpMode", "getAccessVlan", "getNativeVlanId"]
+
+
+def inspect_ports(name, only_linked):
+    """Una linea por puerto: nombre, los PORT_FIELDS ("" si el puerto no tiene ese metodo) y, si hay cable,
+    tipo de cable, equipo y puerto del otro extremo."""
+    fields = ", ".join(q(f) for f in PORT_FIELDS)
+    return wrap(
+        get_dev("d", name) +
+        ' function g(o, m) { if (typeof o[m] != "function") { return ""; } try { return String(o[m]()); } catch (e) { return "?"; } }'
+        ' var F = [%s]; var o = [];'
+        ' for (var i = 0; i < d.getPortCount(); i++) { var p = d.getPortAt(i); var lk = null; try { lk = p.getLink(); } catch (e1) { lk = null; }'
+        ' if (lk && typeof lk.getPort1 != "function") { lk = null; }'
+        ' if (%s && !lk) { continue; }'
+        ' var row = [p.getName()]; for (var k = 0; k < F.length; k++) { row.push(g(p, F[k])); }'
+        ' if (lk) { var a = lk.getPort1(); var b = lk.getPort2();'
+        ' var me = a.getOwnerDevice().getName() == d.getName() && a.getName() == p.getName(); var ot = me ? b : a;'
+        ' row.push(lk.getConnectionType(), ot.getOwnerDevice().getName(), ot.getName()); }'
+        ' o.push(row.join("\\t")); }'
+        ' return o.join("\\n");' % (fields, "true" if only_linked else "false"))
+
+
+def set_port(name, port, ops):
+    """Aplica setters de puerto comprobados en la 6.0.1 y lee el valor despues. ops = [(setter, getter, literal_js)]:
+    el literal ya viene validado (entero, true/false o q(texto)). Devuelve 'setter<TAB>valor leido' por linea."""
+    calls = " ".join(
+        'if (typeof p.%s != "function") { o.push("%s\\tNO EXISTE en este puerto"); } else { p.%s(%s); o.push("%s\\t" + p.%s()); }'
+        % (setter, setter, setter, lit, setter, getter) for setter, getter, lit in ops)
+    return wrap(
+        get_dev("d", name) +
+        ' var p = d.getPort(%s); if (!p) { return "ERROR: " + %s + " no tiene el puerto " + %s; }'
+        ' var o = []; %s return o.join("\\n");' % (q(port), q(name), q(port), calls))
+
+
+def ui_info(name):
+    """Para abrir la ventana de un equipo. Primera linea: 'si'/'no' (getDialog: la ventana existe, visible u oculta),
+    tipo, x, y, puertos separados por comas. Despues una linea 'D nombre x y' por equipo (referencias para situar el lienzo)."""
+    return wrap(
+        get_dev("d", name) +
+        ' var dm = ipc.appWindow().getDialogManager(); var dl = null; try { dl = dm.getDialog(%s); } catch (e1) { dl = null; }'
+        ' var ps = []; for (var i = 0; i < d.getPortCount(); i++) { ps.push(d.getPortAt(i).getName()); }'
+        ' var o = [[dl ? "si" : "no", d.getType(), d.getXCoordinate(), d.getYCoordinate(), ps.join(",")].join("\\t")];'
+        ' for (var j = 0; j < net.getDeviceCount(); j++) { var e = net.getDeviceAt(j);'
+        ' o.push(["D", e.getName(), e.getXCoordinate(), e.getYCoordinate()].join("\\t")); }'
+        ' return o.join("\\n");' % q(name))
+
+
+def dialog_visible(name, visible):
+    """Ensena u oculta la ventana de un equipo SIN destruirla (cerrarla con la X la destruye y luego hay que reabrirla con un clic)."""
+    return wrap(
+        'var dl = null; try { dl = ipc.appWindow().getDialogManager().getDialog(%s); } catch (e) { dl = null; }'
+        ' if (!dl) { return "no"; } dl.setVisible(%s); return "si";' % (q(name), "true" if visible else "false"))
+
+
+SERVER_XML_SECTIONS = ("HTTP_SERVER", "HTTPS_SERVER", "DNS_SERVER", "DHCP_SERVER", "TFTP_SERVER", "FTP_SERVER", "NTP_SERVER",
+                       "SYSLOG_SERVER", "ACS_SERVER", "EMAIL_SERVER")
+
+
+def server_xml(name):
+    """Las secciones de servicios del XML de un Server-PT (lo que se ve en Config > SERVICES), seguidas.
+    Ojo: <DNS_SERVER> aparece tambien DENTRO de un pool DHCP (su IP de DNS); se busca la primera apertura con hijos."""
+    tags = ", ".join(q(t) for t in SERVER_XML_SECTIONS)
+    return wrap(
+        get_dev("d", name) +
+        ' if (d.getType() != 9) { return "ERROR: " + %s + " no es un servidor (Server-PT)"; }'
+        ' var x = String(d.serializeToXml()); var T = [%s]; var o = [];'
+        ' for (var i = 0; i < T.length; i++) { var a = x.indexOf("<" + T[i] + ">\\n"); if (a < 0) { a = x.indexOf("<" + T[i] + ">"); }'
+        ' var b = x.indexOf("</" + T[i] + ">", a); if (a >= 0 && b > a) { o.push(x.substring(a, b + T[i].length + 3)); } }'
+        ' return o.join("\\n");' % (q(name), tags))
+
+
+def ftp_users(name, users):
+    """users = [(usuario, clave, permisos)]. Firma comprobada: addFtpUser(usuario, clave, "RWDNL"). Si ya existe, no se toca."""
+    rows = ", ".join("[%s, %s, %s]" % (q(u), q(p), q(perm)) for u, p, perm in users)
+    return wrap(
+        get_dev("d", name) +
+        ' var f = d.getProcess("FtpServer"); if (!f) { return "ERROR: " + %s + " no tiene servidor FTP"; }'
+        ' var m = f.getFtpUserAccountManager(); var U = [%s]; var o = [];'
+        ' for (var i = 0; i < U.length; i++) { if (m.isExistingUser(U[i][0])) { o.push(U[i][0] + "\\tya existia"); continue; }'
+        # addFtpUser devuelve undefined aunque cree la cuenta (comprobado): se mira si existe despues.
+        ' m.addFtpUser(U[i][0], U[i][1], U[i][2]); o.push(U[i][0] + "\\t" + (m.isExistingUser(U[i][0]) ? "creado" : "PT lo rechazo")); }'
+        ' return o.join("\\n");' % (q(name), rows))
+
+
+def email_setup(name, domain, users):
+    """Dominio (SmtpServer.setServerDomainName) y cuentas (EmailServer.addUser(usuario, clave)), comprobados en la 6.0.1."""
+    rows = ", ".join("[%s, %s]" % (q(u), q(p)) for u, p in users)
+    dom = (' d.getProcess("SmtpServer").setServerDomainName(%s); o.push("dominio\\t" + d.getProcess("SmtpServer").getServerDomainName());'
+           % q(domain)) if domain else ""
+    return wrap(
+        get_dev("d", name) +
+        ' var em = d.getProcess("EmailServer"); if (!em || !d.getProcess("SmtpServer")) { return "ERROR: " + %s + " no tiene servidor de correo"; }'
+        ' var o = [];%s var U = [%s];'
+        ' for (var i = 0; i < U.length; i++) { var had = null; try { had = em.getEmailUser(U[i][0]); } catch (e) { had = null; }'
+        ' if (had) { o.push(U[i][0] + "\\tya existia"); continue; }'
+        ' em.addUser(U[i][0], U[i][1]); o.push(U[i][0] + "\\t" + (em.getEmailUser(U[i][0]) ? "creado" : "PT lo rechazo")); }'
+        ' return o.join("\\n");' % (q(name), dom, rows))
+
+
+def open_dialogs():
+    """Nombres de los equipos cuya ventana existe (visible u oculta)."""
+    return wrap(
+        'var dm = ipc.appWindow().getDialogManager(); var o = [];'
+        ' for (var i = 0; i < net.getDeviceCount(); i++) { var n = net.getDeviceAt(i).getName(); var dl = null;'
+        ' try { dl = dm.getDialog(n); } catch (e) { dl = null; } if (dl) { o.push(n); } }'
+        ' return o.join(",");')
+
+
+def hide_all_dialogs():
+    return wrap(
+        'var dm = ipc.appWindow().getDialogManager(); var o = [];'
+        ' for (var i = 0; i < net.getDeviceCount(); i++) { var n = net.getDeviceAt(i).getName(); var dl = null;'
+        ' try { dl = dm.getDialog(n); } catch (e) { dl = null; } if (dl) { dl.setVisible(false); o.push(n); } }'
+        ' return o.join(",");')

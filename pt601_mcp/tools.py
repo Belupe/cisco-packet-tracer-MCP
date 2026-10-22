@@ -1,11 +1,15 @@
 """Herramientas MCP para Packet Tracer 6.0.1 (traducen llamadas a JavaScript del puente)."""
+import base64
+import binascii
+import os
 import time
 
 import ipaddress
 import json
 import re
+import xml.etree.ElementTree as ET
 
-from . import catalog, ios, jsgen, plan as planmod
+from . import catalog, ios, jsgen, plan as planmod, winui
 from .bridge import BridgeError
 
 
@@ -13,7 +17,51 @@ class ToolError(Exception):
     """Error pensado para que lo lea el usuario / el modelo."""
 
 
+class Rich:
+    """Resultado con texto e imagenes (bytes PNG). mcpproto lo convierte en contenido text + image."""
+
+    def __init__(self, text, images=()):
+        self.text, self.images = text, list(images)
+
+    def __str__(self):
+        return self.text
+
+
 MAX_OUT = 6000
+CAPTURES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "capturas")
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+LIGHTS = {"0": "apagada", "1": "ambar", "2": "verde"}
+# setAdminOpMode/getAdminOpMode de un puerto de switch (comprobado con el running-config en la 6.0.1).
+SWITCH_MODES = {"0": "dynamic desirable", "1": "dynamic auto", "2": "trunk", "3": "access"}
+
+
+# Ventana de un equipo en la 6.0.1 (655x521), medida en capturas el 2026-10-22. Coordenadas desde la esquina de la ventana.
+UI_TAB_Y = 43
+UI_TABS = {"physical": 42, "config": 108, "cli": 160, "desktop": 175, "custom interface": 271}
+UI_TABS_BY_TYPE = {0: ("physical", "config", "cli"), 1: ("physical", "config", "cli"),
+                   8: ("physical", "config", "desktop", "custom interface"), 9: ("physical", "config", "desktop", "custom interface")}
+_UI_HEAD = ["GLOBAL", "Settings", "Algorithm Settings"]
+UI_SECTIONS = {0: _UI_HEAD + ["ROUTING", "Static", "RIP", "INTERFACE"],
+               1: _UI_HEAD + ["SWITCH", "VLAN Database", "INTERFACE"],
+               8: _UI_HEAD + ["Firewall", "IPv6 Firewall", "INTERFACE"],
+               9: _UI_HEAD + ["SERVICES", "HTTP", "DHCP", "TFTP", "DNS", "SYSLOG", "AAA", "NTP", "EMAIL", "FTP",
+                              "FIREWALL", "IPv6 FIREWALL", "INTERFACE"]}
+UI_SECTION_X, UI_SECTION_Y0, UI_SECTION_DY, UI_SECTION_ROWS = 82, 75, 19, 20
+UI_DESKTOP_PC = {"ip configuration": (90, 145), "dial-up": (210, 145), "terminal": (330, 145), "command prompt": (450, 145),
+                 "web browser": (570, 145), "pc wireless": (90, 290), "vpn": (210, 290), "traffic generator": (330, 290),
+                 "mib browser": (450, 290), "cisco ip communicator": (570, 290), "e mail": (90, 410), "email": (90, 410),
+                 "pppoe dialer": (210, 410), "text editor": (330, 410)}
+UI_DESKTOP_SERVER = {"ip configuration": (92, 140), "command prompt": (212, 140), "traffic generator": (332, 140),
+                     "text editor": (452, 140), "web browser": (572, 140), "pppoe dialer": (92, 285), "vpn": (212, 285)}
+UI_DESKTOP = {8: UI_DESKTOP_PC, 9: UI_DESKTOP_SERVER}
+UI_DEVICE_TYPES = {0: "router", 1: "switch", 8: "PC", 9: "servidor"}
+UI_ICON_DX = 15            # el punto logico del equipo cae en el borde izquierdo del icono, a media altura
+
+
+def _safe_filename(name, default):
+    """Nombre de archivo sin carpetas ni caracteres raros, siempre .png."""
+    base = re.sub(r"[^A-Za-z0-9_.-]", "_", os.path.basename(str(name or "").strip())).strip("._") or default
+    return base if base.lower().endswith(".png") else base + ".png"
 
 
 def _clip(text, limit=MAX_OUT):
@@ -31,9 +79,10 @@ B = {"type": "boolean"}
 
 
 class Tools:
-    def __init__(self, bridge, js_timeout=25.0):
+    def __init__(self, bridge, js_timeout=25.0, ui=winui):
         self.bridge = bridge
         self.js_timeout = js_timeout
+        self.ui = ui                     # ventanas de Windows; las pruebas lo sustituyen por uno falso
         self.registry = [
             ("pt_status", "Estado del puente y de Packet Tracer (version, numero de dispositivos).",
              _obj({}), self.status),
@@ -71,9 +120,10 @@ class Tools:
              _obj({"device": S, "port": S}, ["device", "port"]), self.remove_link),
             ("pt_add_module",
              "Anade un modulo (un puerto) a un Switch-PT-Empty o Router-PT-Empty que ya existe. kind: fastethernet (por defecto), "
-             "fiber y, en routers, gigabit, gigabit-fiber, serial, ethernet, modem. Apaga y enciende el equipo: guarda antes su "
+             "fiber y, en routers, gigabit, gigabit-fiber, serial, ethernet, modem. count=N pone N modulos en ranuras seguidas "
+             "desde slot (un solo apagado). Apaga y enciende el equipo: guarda antes su "
              "configuracion (write memory) si es un router ya configurado.",
-             _obj({"device": S, "slot": I, "kind": S}, ["device", "slot"]), self.add_module),
+             _obj({"device": S, "slot": I, "kind": S, "count": I}, ["device", "slot"]), self.add_module),
             ("pt_remove_module",
              "Quita el modulo de una ranura (p. ej. un puerto que sobra en un Switch-PT-Empty: ranura n = FastEthernet<n>/1). "
              "Apaga y enciende el equipo; el puerto debe estar sin cable.",
@@ -84,8 +134,11 @@ class Tools:
              _obj({"device": S, "ip": S, "mask": S, "gateway": S, "dns": S, "port": S, "dhcp": B}, ["device"]), self.set_ip),
             ("pt_cli",
              "Envia comandos a la consola de un router/switch/PC y devuelve la salida nueva. Para routers nuevos "
-             "responde solo 'no' al dialogo inicial. Ej.: ['enable','configure terminal','hostname R1'].",
-             _obj({"device": S, "commands": {"type": "array", "items": S}, "answer_initial_dialog": B},
+             "responde solo 'no' al dialogo inicial. Ej.: ['enable','configure terminal','hostname R1']. "
+             "interactive=true: una linea cada vez esperando la respuesta (para ftp/telnet desde un PC, que piden usuario y "
+             "clave): ['ftp 192.168.1.2','usuario','clave','dir','quit']. wait_seconds = espera maxima por linea.",
+             _obj({"device": S, "commands": {"type": "array", "items": S}, "answer_initial_dialog": B,
+                   "interactive": B, "wait_seconds": I},
                   ["device", "commands"]), self.cli),
             ("pt_running_config",
              "Devuelve la configuracion en ejecucion (running-config) completa de un router o switch, sin paginar: "
@@ -109,6 +162,53 @@ class Tools:
              _obj({"device": S, "target": S, "wait_seconds": I}, ["device", "target"]), self.traceroute),
             ("pt_list_ports", "Lista los puertos de un dispositivo y si estan libres o conectados.",
              _obj({"device": S}, ["device"]), self.list_ports),
+            ("pt_inspect_ports",
+             "Estado REAL de cada puerto de un equipo (lo que se ve en Config > INTERFACE): encendido, linea y protocolo, luz, MAC, IP, "
+             "ancho de banda, duplex, MTU, descripcion, VLAN (switch), vecino del cable. Marca anomalias (cable con el puerto caido, "
+             "puerto apagado...). only_linked=true: solo los puertos con cable.",
+             _obj({"device": S, "only_linked": B}, ["device"]), self.inspect_ports),
+            ("pt_set_port",
+             "Cambia UN puerto como en su ventana (Config > INTERFACE) y dice que se aplico. Por API: description, power (true/false), "
+             "speed (auto|10|100|1000 Mbps), duplex (auto|full|half), mtu, mac (0011.2233.4455), cdp, proxy_arp. Por IOS (switch): "
+             "mode (access|trunk), vlan, native_vlan, allowed_vlans, port_security {maximum, violation: shutdown|restrict|protect, "
+             "sticky, macs}. Por IOS (router): ip_bandwidth (kbps), ip_delay (decenas de us), clock_rate, ospf {cost, priority, hello, "
+             "dead, auth_key, md5_key_id, md5_key}. Solo cambia lo que se pasa. dry_run=true ensena lo que haria. save=true: write memory.",
+             _obj({"device": S, "port": S, "description": S, "power": B, "speed": S, "duplex": S, "mtu": I, "mac": S,
+                   "cdp": B, "proxy_arp": B, "mode": S, "vlan": I, "native_vlan": I,
+                   "allowed_vlans": {"type": "array", "items": I}, "port_security": {"type": "object"},
+                   "ip_bandwidth": I, "ip_delay": I, "clock_rate": I, "ospf": {"type": "object"}, "dry_run": B, "save": B},
+                  ["device", "port"]), self.set_port),
+            ("pt_screenshot",
+             "Captura el MAPA (espacio de trabajo logico) como PNG: lo guarda en la carpeta capturas/ del proyecto y ensena la imagen. "
+             "filename opcional (sin carpetas).",
+             _obj({"filename": S}, []), self.screenshot),
+            ("pt_server_read",
+             "Lee TODO lo que se ve en Config > SERVICES de un Server-PT (del XML del equipo): que servicios estan encendidos, "
+             "registros DNS (nombre, tipo, IP, TTL), pools DHCP, cuentas FTP con permisos, dominio y cuentas de correo, NTP, AAA. "
+             "Sirve para comprobar lo hecho a mano o por el MCP.",
+             _obj({"device": S}, ["device"]), self.server_read),
+            ("pt_server_ftp",
+             "Crea cuentas FTP en un Server-PT: users=[{name, password, permissions}] (permisos con letras R W D N L = "
+             "leer, escribir, borrar, renombrar, listar; por defecto RWDNL). Si la cuenta ya existe no la toca.",
+             _obj({"device": S, "users": {"type": "array", "items": {"type": "object"}}}, ["device", "users"]), self.server_ftp),
+            ("pt_server_email",
+             "Correo de un Server-PT: domain (el del boton Set de EMAIL) y cuentas users=[{name, password}]. "
+             "Para encender SMTP/POP3 usa pt_server_services. Si la cuenta ya existe no la toca.",
+             _obj({"device": S, "domain": S, "users": {"type": "array", "items": {"type": "object"}}}, ["device"]),
+             self.server_email),
+            ("pt_ui_open",
+             "Abre la VENTANA de un equipo (como hacer clic en su icono) sin mover el raton, elige pestana (physical, config, cli, "
+             "desktop, custom interface), seccion de Config (Settings, VLAN Database, Static, RIP, HTTP, DHCP, DNS, EMAIL, FTP, "
+             "FastEthernet0/1...) y, en un PC, aplicacion del Desktop (ip configuration, command prompt, web browser...). "
+             "Devuelve la captura de la ventana y la guarda en capturas/. El mapa debe estar a zoom 100 %.",
+             _obj({"device": S, "tab": S, "section": S, "app": S, "filename": S}, ["device"]), self.ui_open),
+            ("pt_ui_capture",
+             "Captura como PNG la ventana de un equipo ya abierta (device) o, sin device, la ventana principal de Packet Tracer. "
+             "La guarda en capturas/ y ensena la imagen.",
+             _obj({"device": S, "filename": S}, []), self.ui_capture),
+            ("pt_ui_close",
+             "Oculta la ventana de un equipo (o todas sin device). Se oculta sin destruirla: pt_ui_open la vuelve a ensenar al momento.",
+             _obj({"device": S}, []), self.ui_close),
             ("pt_connect",
              "Conecta dos dispositivos ELIGIENDO PUERTOS LIBRES automaticamente (o los que indiques). "
              "cable: auto (por defecto)|straight|cross|fiber.",
@@ -131,7 +231,9 @@ class Tools:
              "Configura un switch desde una descripcion: hostname, vlans, access_ports, trunk_ports, svi, extra.",
              _obj({"device": S, "spec": {"type": "object"}}, ["device", "spec"]), self.switch_config),
             ("pt_dhcp_server",
-             "Activa el servicio DHCP de un Server-PT y crea un pool (IP estatica del servidor: usa pt_set_ip).",
+             "Activa el servicio DHCP de un Server-PT y configura un pool: red y mascara (sacadas de start_ip y mask), inicio, "
+             "fin (max_users), gateway y dns. pool: por defecto serverPool (el de fabrica); otro nombre crea un pool NUEVO "
+             "(para otra red que llega por ip helper). IP estatica del servidor: usa pt_set_ip.",
              _obj({"device": S, "pool": S, "start_ip": S, "mask": S, "gateway": S, "dns": S, "max_users": I, "tftp": S},
                   ["device", "start_ip", "mask"]), self.dhcp_server),
             ("pt_dns_server",
@@ -158,7 +260,8 @@ class Tools:
             ("pt_class_plan",
              "Genera (y con build=true construye) una red con las CONVENCIONES DE CLASE de reglas.md a partir del enunciado: "
              "spec={server_switch, servers:[{name, ip, services?, dhcp?}], sites:[{name, pcs, laptops}], hosts_dhcp?, notes?}. "
-             "Pone nombres por ultimo octeto desde la .10, puertos justos, cables, posiciones del esquema, gateway .1 y DNS. "
+             "Pone nombres por ultimo octeto desde la .10 (con hosts_dhcp=true NO renombra: PC0, Laptop0...), puertos justos, "
+             "cables, posiciones del esquema, gateway .1 y DNS. "
              "Sin build devuelve el plan para revisarlo.",
              _obj({"spec": {"type": "object"}, "build": B}, ["spec"]), self.class_plan),
             ("pt_routed_plan",
@@ -320,7 +423,10 @@ class Tools:
         kind = str(args.get("kind") or "fastethernet").strip().lower()
         if kind not in kinds:
             raise ToolError("kind desconocido para %s: %s. Opciones: %s" % (model, kind, ", ".join(sorted(kinds))))
-        return self._run(jsgen.add_module(dev, slot, mtype, kinds[kind]))
+        count = args.get("count", 1)
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 10:
+            raise ToolError("'count' debe ser un entero entre 1 y 10")
+        return self._run(jsgen.add_module(dev, slot, mtype, kinds[kind], count))
 
     def remove_module(self, args):
         slot = self._req(args, "slot")
@@ -346,10 +452,32 @@ class Tools:
         new = str(self._req(args, "new_name")).strip()
         return self._run(jsgen.rename_device(self._req(args, "name"), new))
 
+    def _cli_interactive(self, dev, commands, wait):
+        """Una linea cada vez, esperando su respuesta: para sesiones que piden datos (ftp: Username/Password, telnet...).
+        Sin el Enter de 'despertar' (con el prompt vacio se tomaria como respuesta) y sin mandar la linea siguiente antes de
+        que llegue su prompt (se perderia: comprobado con ftp el 2026-10-22)."""
+        out = []
+        for cmd in commands:
+            start = int(self._run(jsgen.output_length(dev)))
+            self._run(jsgen.send_only(dev, cmd))
+            deadline, last, stable = time.time() + wait, None, 0
+            while time.time() < deadline:
+                time.sleep(0.5)
+                text = self._run(jsgen.read_output(dev, start, 0))
+                stable = stable + 1 if (text == last and text.strip()) else 0
+                last = text
+                if stable >= 2:                    # un segundo sin cambios: la respuesta ha terminado
+                    break
+            out.append(last or "")
+        return _clip("".join(out))
+
     def cli(self, args):
         commands = args.get("commands")
         if not isinstance(commands, list) or not commands:
             raise ToolError("commands debe ser una lista no vacia de textos")
+        if args.get("interactive"):
+            wait = max(2, min(int(args.get("wait_seconds") or 10), 60))
+            return self._cli_interactive(self._req(args, "device"), [str(c) for c in commands], wait)
         timeout = max(self.js_timeout, 10 + 1.0 * len(commands))
         out = self._run(jsgen.cli(self._req(args, "device"), [str(c) for c in commands],
                                   args.get("answer_initial_dialog", True)), timeout)
@@ -472,6 +600,319 @@ class Tools:
         rows += [" | ".join(line.split("\t")) for line in out.split("\n") if line.strip()]
         return "\n".join(rows)
 
+    def inspect_ports(self, args):
+        dev = self._req(args, "device")
+        out = self._run(jsgen.inspect_ports(dev, bool(args.get("only_linked"))))
+        cables = {}
+        for cname, code in catalog.CABLES.items():
+            cables.setdefault(str(code), cname)
+        n = len(jsgen.PORT_FIELDS)
+        lines, warns = [], []
+        for line in out.split("\n"):
+            if not line.strip():
+                continue
+            f = line.split("\t")
+            name, v = f[0], dict(zip(jsgen.PORT_FIELDS, f[1:n + 1]))
+            link = f[n + 1:n + 4] if len(f) >= n + 4 else None
+            parts = ["encendido" if v["getPower"] == "true" else "APAGADO",
+                     "linea %s / protocolo %s" % ("arriba" if v["isPortUp"] == "true" else "abajo",
+                                                  "arriba" if v["isProtocolUp"] == "true" else "abajo"),
+                     "luz %s" % LIGHTS.get(v["getLightStatus"], v["getLightStatus"] or "-")]
+            if v["getIpAddress"] and v["getIpAddress"] != "0.0.0.0":
+                parts.append("ip %s/%s%s" % (v["getIpAddress"], v["getSubnetMask"], " (DHCP)" if v["isDhcpClientOn"] == "true" else ""))
+            elif v["isDhcpClientOn"] == "true":
+                parts.append("ip por DHCP (sin direccion)")
+            if v["getMacAddress"]:
+                parts.append("mac %s" % v["getMacAddress"])
+            if v["getBandwidth"] not in ("", "0"):
+                parts.append("%s kbps%s" % (v["getBandwidth"], " auto" if v["isBandwidthAutoNegotiate"] == "true" else ""))
+            if v["isFullDuplex"] and v["isPortUp"] == "true":         # caido, el duplex no esta negociado
+                parts.append("%s duplex%s" % ("full" if v["isFullDuplex"] == "true" else "half",
+                                              " auto" if v["isDuplexAutoNegotiate"] == "true" else ""))
+            if v["getMtu"]:
+                parts.append("mtu %s" % v["getMtu"])
+            if v["getDelay"]:
+                parts.append("delay %s" % v["getDelay"])
+            if v["getAdminOpMode"]:
+                mode = SWITCH_MODES.get(v["getAdminOpMode"], v["getAdminOpMode"])
+                parts.append(("modo trunk (nativa %s)" % v["getNativeVlanId"]) if mode == "trunk"
+                             else "modo %s, vlan %s" % (mode, v["getAccessVlan"]))
+            if v["isCdpEnable"] == "false":
+                parts.append("sin CDP")
+            if v["getNatMode"] not in ("", "0"):
+                parts.append("nat %s" % v["getNatMode"])
+            if v["getAclInID"] or v["getAclOutID"]:
+                parts.append("acl in=%s out=%s" % (v["getAclInID"] or "-", v["getAclOutID"] or "-"))
+            if v["getDescription"]:
+                parts.append('descripcion "%s"' % v["getDescription"])
+            if link:
+                parts.append("cable %s -> %s:%s" % (cables.get(link[0], link[0]), link[1], link[2]))
+                if v["getPower"] == "false":
+                    warns.append("%s: tiene cable pero el puerto esta APAGADO (en un router: falta 'no shutdown')" % name)
+                elif v["isPortUp"] != "true":
+                    warns.append("%s: tiene cable pero la linea esta caida (el otro extremo %s:%s apagado o sin senal)"
+                                 % (name, link[1], link[2]))
+                elif v["isProtocolUp"] != "true":
+                    warns.append("%s: linea arriba pero protocolo caido" % name)
+            else:
+                parts.append("sin cable")
+            lines.append("%s: %s" % (name, ", ".join(parts)))
+        if not lines:
+            return "(%s no tiene puertos%s)" % (dev, " con cable" if args.get("only_linked") else "")
+        lines.append("AVISOS:" if warns else "Sin anomalias.")
+        lines += ["  " + w for w in warns]
+        return _clip("\n".join(lines), 20000)
+
+    @staticmethod
+    def _port_ops(args):
+        """Setters de API de pt_set_port: [(setter, getter, literal_js)], en el orden en que se aplican."""
+        ops = []
+        if args.get("description") is not None:
+            ops.append(("setDescription", "getDescription", jsgen.q(args["description"])))
+        for key, setter, getter in (("power", "setPower", "getPower"), ("cdp", "setCdpEnable", "isCdpEnable"),
+                                    ("proxy_arp", "setProxyArpEnabled", "isProxyArpEnabled")):
+            if args.get(key) is not None:
+                if not isinstance(args[key], bool):
+                    raise ToolError("'%s' debe ser true o false" % key)
+                ops.append((setter, getter, "true" if args[key] else "false"))
+        speed = args.get("speed")
+        if speed is not None:
+            speed = str(speed).strip().lower()
+            if speed == "auto":
+                ops.append(("setBandwidthAutoNegotiate", "isBandwidthAutoNegotiate", "true"))
+            elif speed in ("10", "100", "1000"):
+                # setBandwidth es la velocidad fisica en kbps (sale como 'speed N' en el running-config).
+                ops += [("setBandwidthAutoNegotiate", "isBandwidthAutoNegotiate", "false"),
+                        ("setBandwidth", "getBandwidth", str(int(speed) * 1000))]
+            else:
+                raise ToolError("speed debe ser auto, 10, 100 o 1000")
+        duplex = args.get("duplex")
+        if duplex is not None:
+            duplex = str(duplex).strip().lower()
+            if duplex == "auto":
+                ops.append(("setDuplexAutoNegotiate", "isDuplexAutoNegotiate", "true"))
+            elif duplex in ("full", "half"):
+                ops += [("setDuplexAutoNegotiate", "isDuplexAutoNegotiate", "false"),
+                        ("setFullDuplex", "isFullDuplex", "true" if duplex == "full" else "false")]
+            else:
+                raise ToolError("duplex debe ser auto, full o half")
+        if args.get("mtu") is not None:
+            mtu = args["mtu"]
+            if isinstance(mtu, bool) or not isinstance(mtu, int) or not 64 <= mtu <= 9216:
+                raise ToolError("mtu debe ser un entero entre 64 y 9216")
+            ops.append(("setMtu", "getMtu", str(mtu)))
+        if args.get("mac"):
+            try:
+                ops.append(("setMacAddress", "getMacAddress", jsgen.q(ios.check_mac(args["mac"]))))
+            except ios.ConfigError as exc:
+                raise ToolError(str(exc))
+        return ops
+
+    def set_port(self, args):
+        dev, port = self._req(args, "device"), str(self._req(args, "port")).strip()
+        ops = self._port_ops(args)
+        try:
+            cmds = ios.port_config(port, args)
+        except (ios.ConfigError, ValueError, TypeError) as exc:
+            raise ToolError("valor invalido: %s" % exc)
+        if not ops and not cmds:
+            raise ToolError("No hay nada que cambiar: pasa al menos un campo (description, power, speed, mode, vlan...)")
+        if args.get("save"):
+            cmds = (cmds[:-1] + ["end"] if cmds else ["enable"]) + ["write memory"]
+        if args.get("dry_run"):
+            lines = ["Plan para %s %s:" % (dev, port)]
+            lines += ["  API %s(%s)" % (s, lit) for s, _g, lit in ops]
+            lines += ["  IOS %s" % c for c in cmds]
+            return "\n".join(lines)
+        out = []
+        if ops:
+            for line in self._run(jsgen.set_port(dev, port, ops)).split("\n"):
+                setter, _, value = line.partition("\t")
+                out.append("  %s -> %s" % (setter, value))
+        if cmds:
+            res = self.cli({"device": dev, "commands": cmds})
+            bad = [ln for ln in str(res).splitlines() if "% Invalid" in ln or "% Incomplete" in ln or "% Ambiguous" in ln]
+            out.append("  IOS: %d comandos%s" % (len(cmds), (" | RECHAZADOS: " + " / ".join(bad)) if bad else " aceptados"))
+        return "OK %s %s\n%s" % (dev, port, "\n".join(out))
+
+    def _map_png(self):
+        out = self._run(jsgen.workspace_image("PNG"), timeout=60)
+        try:
+            data = base64.b64decode(out.strip(), validate=True)
+        except (binascii.Error, ValueError):
+            raise ToolError("PT devolvio una imagen que no es base64 valido (%d caracteres)" % len(out))
+        if not data.startswith(PNG_SIGNATURE):
+            raise ToolError("PT no devolvio un PNG (firma incorrecta)")
+        return data
+
+    @staticmethod
+    def _save_png(data, filename, default):
+        os.makedirs(CAPTURES_DIR, exist_ok=True)
+        path = os.path.join(CAPTURES_DIR, _safe_filename(filename, default + "-" + time.strftime("%Y%m%d-%H%M%S")))
+        with open(path, "wb") as fh:
+            fh.write(data)
+        width, height = int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+        return "%s (%dx%d, %d KB)" % (path, width, height, max(1, len(data) // 1024))
+
+    def screenshot(self, args):
+        data = self._map_png()
+        return Rich("OK mapa guardado en %s" % self._save_png(data, args.get("filename"), "mapa"), [data])
+
+    # ---- ventanas de los equipos (bloque 2 de PRUEBAS_EN_CLASE.md) -------
+    def _ui(self, fn, *a):
+        try:
+            return getattr(self.ui, fn)(*a)
+        except winui.WinUiError as exc:
+            raise ToolError(str(exc))
+
+    def _wait_window(self, name, seconds=3.0):
+        deadline = time.time() + seconds
+        while True:
+            hwnd, visible = self._ui("device_window", name)
+            if hwnd and visible:
+                return hwnd
+            if time.time() >= deadline:
+                return None
+            time.sleep(0.25)
+
+    def _canvas_offset(self, refs):
+        """Desfase entre el PNG del mapa y la captura de la ventana principal (el lienzo puede estar desplazado).
+        refs = [(x, y)] puntos logicos de equipos: se prueba un trozo de 12x12 en cada icono hasta que uno aparezca UNA vez."""
+        _mw, _mh, mrows = self._ui("decode_png", self._map_png())
+        main, _pid = self._ui("main_window")
+        _w, _h, wrows = self._ui("capture", main, True)      # entera: los clics se miden desde la esquina de GetWindowRect
+        for x, y in refs:
+            sx, sy = int(x) + UI_ICON_DX - 6, int(y) - 6
+            if sx < 0 or sy < 0 or sy + 12 > len(mrows) or (sx + 12) * 3 > len(mrows[0]):
+                continue
+            if not self.ui.distinctive(mrows, sx, sy):
+                continue
+            hits = self.ui.locate(wrows, mrows, sx, sy)
+            if len(hits) == 1:
+                return main, hits[0]
+        raise ToolError("No encuentro el mapa dentro de la ventana de Packet Tracer. Pon el zoom al 100 %% y desplaza el mapa "
+                        "para que se vea el equipo (o algun otro) y vuelve a probar.")
+
+    def _open_by_click(self, name, x, y, refs):
+        main, (dx, dy) = self._canvas_offset([(x, y)] + [r for r in refs if r != (x, y)])
+        for ox, oy in ((UI_ICON_DX, 0), (25, 0), (5, 0), (UI_ICON_DX, -10)):
+            self._ui("key", main, winui.VK_ESCAPE)              # herramienta Select: un clic con Delete activa borraria el equipo
+            self._ui("click", main, x + ox + dx, y + oy + dy)
+            for _ in range(8):
+                time.sleep(0.25)
+                if self._run(jsgen.ui_info(name)).startswith("si"):
+                    return
+        raise ToolError("Hice clic sobre %s y no se abrio su ventana. Comprueba que se ve en pantalla (zoom 100 %%) y que la "
+                        "herramienta Select esta activa." % name)
+
+    def _open_window(self, name):
+        lines = self._run(jsgen.ui_info(name)).split("\n")
+        head = lines[0].split("\t")
+        exists, dtype = head[0] == "si", int(head[1])
+        x, y = float(head[2]), float(head[3])
+        ports = [p for p in head[4].split(",") if p] if len(head) > 4 else []
+        if exists:
+            self._run(jsgen.dialog_visible(name, True))
+        else:
+            refs = [(float(f[2]), float(f[3])) for f in (ln.split("\t") for ln in lines[1:]) if len(f) >= 4 and f[0] == "D"]
+            self._open_by_click(name, x, y, refs)
+        hwnd = self._wait_window(name)
+        if not hwnd:
+            raise ToolError("La ventana de %s no aparece" % name)
+        return hwnd, dtype, ports
+
+    @staticmethod
+    def _section_row(dtype, ports, section):
+        names = list(UI_SECTIONS[dtype]) + [p for p in ports if not p.startswith("Vlan")]
+        wanted = section.strip().lower()
+        for i, n in enumerate(names):
+            if n.lower() == wanted:
+                if i >= UI_SECTION_ROWS:
+                    raise ToolError("La seccion %s queda fuera de la lista visible (habria que desplazarla)" % n)
+                return n, UI_SECTION_Y0 + UI_SECTION_DY * i
+        raise ToolError("Seccion desconocida para este equipo: %s. Opciones: %s" % (section, ", ".join(names)))
+
+    def ui_open(self, args):
+        name = str(self._req(args, "device")).strip()
+        tab = str(args.get("tab") or "").strip().lower()
+        section, app = args.get("section"), args.get("app")
+        if (section or app) and not tab:
+            tab = "desktop" if app else "config"
+        hwnd, dtype, ports = self._open_window(name)
+        if dtype not in UI_TABS_BY_TYPE and (tab or section or app):
+            raise ToolError("Todavia no se el formato de la ventana de este tipo de equipo (%s): solo se puede abrir y capturar" % dtype)
+        done = ["ventana de %s abierta" % name]
+        if tab:
+            if tab not in UI_TABS_BY_TYPE[dtype]:
+                raise ToolError("Un %s no tiene la pestana %s. Opciones: %s" % (UI_DEVICE_TYPES[dtype], tab, ", ".join(UI_TABS_BY_TYPE[dtype])))
+            self._ui("click", hwnd, UI_TABS[tab], UI_TAB_Y)
+            time.sleep(0.4)
+            done.append("pestana %s" % tab)
+        if section:
+            if tab != "config":
+                raise ToolError("Las secciones (section) son de la pestana config")
+            label, row_y = self._section_row(dtype, ports, str(section))
+            self._ui("click", hwnd, UI_SECTION_X, row_y)
+            time.sleep(0.4)
+            done.append("seccion %s" % label)
+        if app:
+            if tab != "desktop" or dtype not in UI_DESKTOP:
+                raise ToolError("Las aplicaciones (app) solo estan medidas en el Desktop de un PC y de un servidor")
+            apps = UI_DESKTOP[dtype]
+            pos = apps.get(str(app).strip().lower())
+            if not pos:
+                raise ToolError("Aplicacion desconocida en un %s: %s. Opciones: %s" % (UI_DEVICE_TYPES[dtype], app, ", ".join(sorted(apps))))
+            # Si ya hay otra aplicacion abierta tapa los iconos: se cierra con su X (cada una la tiene en otro sitio).
+            self._close_desktop_app(hwnd)
+            self._ui("click", hwnd, pos[0], pos[1])
+            time.sleep(0.6)
+            done.append("aplicacion %s" % app)
+            result = self._capture_window(hwnd, args.get("filename"), name, "OK " + ", ".join(done))
+            # Y se cierra al terminar: una aplicacion abierta guarda los valores que ensena y, al cerrarla mas tarde, los
+            # ESCRIBE en el equipo, pisando lo que haya cambiado el MCP entretanto (comprobado con el gateway, 2026-10-22).
+            self._close_desktop_app(hwnd)
+            result.text += " (aplicacion cerrada despues de la captura)"
+            return result
+        return self._capture_window(hwnd, args.get("filename"), name, "OK " + ", ".join(done))
+
+    def _close_desktop_app(self, hwnd):
+        _w, _h, rows = self._ui("capture", hwnd, True)
+        close = self.ui.desktop_app_close(rows)
+        if close:
+            self._ui("click", hwnd, close[0], close[1])
+            time.sleep(0.4)
+        return bool(close)
+
+    def _capture_window(self, hwnd, filename, default, prefix):
+        w, h, rows = self._ui("capture", hwnd)
+        data = self._ui("encode_png", w, h, rows)
+        return Rich("%s. Captura: %s" % (prefix, self._save_png(data, filename, _safe_filename(default, "ventana")[:-4])), [data])
+
+    def ui_capture(self, args):
+        name = str(args.get("device") or "").strip()
+        if name:
+            hwnd, visible = self._ui("device_window", name)
+            if not hwnd or not visible:
+                raise ToolError("La ventana de %s no esta abierta: usa pt_ui_open" % name)
+            return self._capture_window(hwnd, args.get("filename"), name, "OK ventana de %s" % name)
+        main, _pid = self._ui("main_window")
+        return self._capture_window(main, args.get("filename"), "packet-tracer", "OK ventana principal")
+
+    def ui_close(self, args):
+        name = str(args.get("device") or "").strip()
+        names = [name] if name else [n for n in self._run(jsgen.open_dialogs()).split(",") if n]
+        hidden, apps = [], []
+        for n in names:
+            hwnd, visible = self._ui("device_window", n)
+            if hwnd and visible and self._close_desktop_app(hwnd):     # antes de ocultar: si no, guardaria valores viejos
+                apps.append(n)
+            if self._run(jsgen.dialog_visible(n, False)).strip() == "si":
+                hidden.append(n)
+        if not hidden:
+            return "La ventana de %s no estaba abierta" % name if name else "OK ninguna ventana estaba abierta"
+        extra = (" (cerrada la aplicacion del Desktop de %s)" % ", ".join(apps)) if apps else ""
+        return "OK ocultas: %s%s. pt_ui_open las vuelve a ensenar." % (", ".join(hidden), extra)
+
     def connect(self, args):
         try:
             code = catalog.cable_code(args.get("cable") or "auto")
@@ -525,8 +966,11 @@ class Tools:
             tftp = ios.check_ip(args["tftp"], "tftp") if args.get("tftp") else ""
         except ios.ConfigError as exc:
             raise ToolError(str(exc))
-        # La 6.0.1 no tiene "maximo de usuarios": el pool se define por IP inicial y final. pool y tftp no se pueden
-        # fijar por IPC (el pool por defecto se llama serverPool).
+        # La 6.0.1 no tiene "maximo de usuarios": el pool se define por IP inicial y final. tftp no se puede fijar por IPC.
+        # pool: por defecto el de fabrica (serverPool); con otro nombre se crea un pool nuevo (addPool).
+        pool = str(args.get("pool") or "serverPool").strip()
+        if not re.match(r"^[A-Za-z0-9_-]{1,32}$", pool):
+            raise ToolError("pool invalido: %r (letras, numeros, - y _)" % pool)
         try:
             users = int(args.get("max_users") or 50)
             net = ipaddress.ip_network("%s/%s" % (start, mask), strict=False)
@@ -535,7 +979,8 @@ class Tools:
             raise ToolError("max_users o rango invalido: %s" % exc)
         if users < 1 or end not in net:
             raise ToolError("El rango %s + %d usuarios se sale de la red %s" % (start, users, net))
-        return self._run(jsgen.dhcp_server(self._req(args, "device"), gw, dns, start, str(end), mask))
+        return self._run(jsgen.dhcp_server(self._req(args, "device"), gw, dns, start, str(end), mask,
+                                           str(net.network_address), pool))
 
     def dns_server(self, args):
         records = args.get("records")
@@ -546,6 +991,107 @@ class Tools:
         except (KeyError, ios.ConfigError) as exc:
             raise ToolError("registro invalido: %s" % exc)
         return self._run(jsgen.dns_server(self._req(args, "device"), clean))
+
+    def server_read(self, args):
+        name = self._req(args, "device")
+        xml = self._run(jsgen.server_xml(name))
+        sec = {}
+        for tag in jsgen.SERVER_XML_SECTIONS:
+            m = re.search(r"<%s>.*?</%s>" % (tag, tag), xml, re.S)
+            if m:
+                try:
+                    sec[tag] = ET.fromstring(m.group(0))
+                except ET.ParseError:
+                    pass
+
+        def val(node, path, default=""):
+            found = node.find(path) if node is not None else None
+            return (found.text or "").strip() if found is not None and found.text else default
+
+        def onoff(node, path="ENABLED"):
+            return "encendido" if val(node, path) == "1" else "apagado"
+        lines = ["Servicios de %s:" % name]
+        http = sec.get("HTTP_SERVER")
+        if http is not None:
+            extra = (" (usuario %s)" % val(http, "USERNAME")) if val(http, "USERNAME") else ""
+            lines.append("HTTP: %s%s" % (onoff(http), extra))
+        if sec.get("HTTPS_SERVER") is not None:
+            lines.append("HTTPS: %s" % onoff(sec["HTTPS_SERVER"], "HTTPSENABLED"))
+        dns = sec.get("DNS_SERVER")
+        if dns is not None:
+            recs = dns.findall("./NAMESERVER-DATABASE/RESOURCE-RECORD")
+            lines.append("DNS: %s, %d registro(s)" % (onoff(dns), len(recs)))
+            for r in recs:
+                fields = ["%s=%s" % (c.tag.lower(), (c.text or "").strip()) for c in r if c.tag not in ("TYPE", "NAME")]
+                lines.append("  %s %s %s" % (val(r, "NAME"), val(r, "TYPE"), " ".join(fields)))
+        dhcp = sec.get("DHCP_SERVER")
+        if dhcp is not None:
+            pools = dhcp.findall("./POOLS/POOL")
+            lines.append("DHCP: %s, %d pool(s)" % (onoff(dhcp), len(pools)))
+            for p in pools:
+                lines.append("  %s: %s - %s mascara %s gateway %s dns %s max %s" % (
+                    val(p, "NAME"), val(p, "START_IP"), val(p, "END_IP"), val(p, "MASK"), val(p, "DEFAULT_ROUTER"),
+                    val(p, "DNS_SERVER"), val(p, "MAX_USERS")))
+        if sec.get("TFTP_SERVER") is not None:
+            lines.append("TFTP: %s" % onoff(sec["TFTP_SERVER"]))
+        ftp = sec.get("FTP_SERVER")
+        if ftp is not None:
+            accs = ftp.findall("./USER_ACCOUNT_MNGR/ACCOUNT")
+            lines.append("FTP: %s, cuentas: %s" % (onoff(ftp), ", ".join(
+                "%s/%s (%s)" % (val(a, "USERNAME"), val(a, "PASSWORD"), val(a, "PERMISSIONS")) for a in accs) or "ninguna"))
+        ntp = sec.get("NTP_SERVER")
+        if ntp is not None:
+            auth = val(ntp, "ENABLED_SERVER_AUTHENTICATE") == "1"
+            lines.append("NTP: %s, autenticacion %s" % (onoff(ntp), ("si (clave %s)" % val(ntp, "KEY")) if auth else "no"))
+        if sec.get("SYSLOG_SERVER") is not None:
+            entries = [c for c in sec["SYSLOG_SERVER"] if c.tag != "ENABLED"]
+            lines.append("SYSLOG: %s%s" % (onoff(sec["SYSLOG_SERVER"]), (", %d entrada(s)" % len(entries)) if entries else ""))
+        acs = sec.get("ACS_SERVER")
+        if acs is not None:
+            lines.append("AAA: %s, %d usuario(s), %d cliente(s)" % (onoff(acs), len(acs.findall("./USERS/*")),
+                                                                     len(acs.findall("./ACS_CLIENTS/*"))))
+        mail = sec.get("EMAIL_SERVER")
+        if mail is not None:
+            n = int(val(mail, "NO_OF_USERS", "0") or 0)
+            users = ["%s/%s" % (val(mail, "USER%d" % i), val(mail, "PASSWORD%d" % i)) for i in range(n)]
+            lines.append("EMAIL: SMTP %s, POP3 %s, dominio %s, cuentas: %s" % (
+                onoff(mail, "SMTP_ENABLED"), onoff(mail, "POP3_ENABLED"), val(mail, "SMTP_DOMAIN") or "(sin dominio)",
+                ", ".join(users) or "ninguna"))
+        return "\n".join(lines)
+
+    @staticmethod
+    def _accounts(users, what):
+        if not isinstance(users, list) or not users:
+            raise ToolError("users debe ser una lista de cuentas [{name, password}]")
+        out = []
+        for u in users:
+            if not isinstance(u, dict):
+                raise ToolError("cada cuenta de %s es un objeto {name, password}" % what)
+            name, pwd = str(u.get("name") or "").strip(), str(u.get("password") or "").strip()
+            if not name or not pwd or any(c.isspace() for c in name + pwd):
+                raise ToolError("cuenta de %s invalida: hace falta name y password, sin espacios (%r)" % (what, u))
+            out.append((name, pwd, u))
+        return out
+
+    def server_ftp(self, args):
+        rows = []
+        for name, pwd, u in self._accounts(args.get("users"), "FTP"):
+            perms = str(u.get("permissions") or "RWDNL").strip().upper()
+            if not perms or any(c not in "RWDNL" for c in perms) or len(set(perms)) != len(perms):
+                raise ToolError("permissions invalidos para %s: %r (letras R W D N L, sin repetir)" % (name, perms))
+            rows.append((name, pwd, "".join(c for c in "RWDNL" if c in perms)))       # en el orden de PT
+        out = self._run(jsgen.ftp_users(self._req(args, "device"), rows))
+        return "FTP:\n" + "\n".join("  %s: %s" % tuple(line.split("\t", 1)) for line in out.split("\n") if "\t" in line)
+
+    def server_email(self, args):
+        domain = str(args.get("domain") or "").strip()
+        if domain and (" " in domain or "." not in domain):
+            raise ToolError("domain invalido: %r (ej. barriosmadrid.es)" % domain)
+        users = [(n, p) for n, p, _u in self._accounts(args["users"], "correo")] if args.get("users") else []
+        if not domain and not users:
+            raise ToolError("Pasa domain, users o los dos")
+        out = self._run(jsgen.email_setup(self._req(args, "device"), domain, users))
+        return "Correo:\n" + "\n".join("  %s: %s" % tuple(line.split("\t", 1)) for line in out.split("\n") if "\t" in line)
 
     def server_services(self, args):
         services = args.get("services")
@@ -731,10 +1277,13 @@ class Tools:
 
         for l in plan.get("links", []):
             step("cable %s <-> %s" % (l["a"], l["b"]), lambda l=l: do_link(l))
-        # Si el DHCP lo da un router del plan, los clientes se activan AL FINAL y de uno en uno (en el orden del plan):
-        # si no, piden IP por su cuenta en cualquier orden y el nombre deja de coincidir con la IP.
-        router_dhcp = any(r.get("dhcp_pools") for r in plan.get("routers", []))
-        deferred = [h for h in plan.get("hosts", []) if h.get("dhcp")] if router_dhcp else []
+        # Si el DHCP lo da un router o un servidor del plan, los clientes se activan AL FINAL y de uno en uno (en el
+        # orden del plan): si no, piden IP por su cuenta en cualquier orden y el nombre deja de coincidir con la IP.
+        # Ademas, recien cableado el puerto del switch aun no reenvia y un unico 'ipconfig /renew' acaba en
+        # "DHCP request failed" (Practica 2B, 19 equipos sin IP): _dhcp_in_order reintenta hasta que llega.
+        plan_dhcp = (any(r.get("dhcp_pools") for r in plan.get("routers", []))
+                     or any(isinstance(s.get("dhcp"), dict) for s in plan.get("servers", [])))
+        deferred = [h for h in plan.get("hosts", []) if h.get("dhcp")] if plan_dhcp else []
         for h in plan.get("hosts", []):
             if h in deferred:
                 continue
@@ -749,8 +1298,10 @@ class Tools:
                      "gateway": srv.get("gateway"), "dns": srv.get("dns_server"), "port": srv.get("port")}))
             if isinstance(srv.get("dhcp"), dict):
                 dh = srv["dhcp"]
+                # Sin "pool": los planes llevan nombres de ejemplo ("LAN") y crear un pool nuevo dejaria serverPool repartiendo
+                # en la misma red. Un pool adicional (otra red, con ip helper) se pide aparte con pt_dhcp_server.
                 step("DHCP en %s" % srv["device"], lambda srv=srv, dh=dh: self.dhcp_server(
-                    {"device": srv["device"], "pool": dh.get("pool"), "gateway": dh.get("gateway"), "dns": dh.get("dns"),
+                    {"device": srv["device"], "gateway": dh.get("gateway"), "dns": dh.get("dns"),
                      "start_ip": dh["start_ip"], "mask": dh["mask"], "max_users": dh.get("max_users"),
                      "tftp": dh.get("tftp")}))
             if isinstance(srv.get("dns"), dict) and srv["dns"].get("records"):
@@ -759,13 +1310,6 @@ class Tools:
             if isinstance(srv.get("services"), list):
                 step("servicios de %s" % srv["device"], lambda srv=srv: self.server_services(
                     {"device": srv["device"], "services": srv["services"]}))
-        # En la 6.0.1 activar el cliente DHCP no pide la IP si el servidor aun no existia o no habia cable:
-        # una vez cableado y con el pool listo, se fuerza con ipconfig /renew (comprobado en PT real).
-        if any(isinstance(s.get("dhcp"), dict) for s in plan.get("servers", [])):
-            for h in plan.get("hosts", []):
-                if h.get("dhcp"):
-                    step("DHCP renovar %s" % h["device"],
-                         lambda h=h: self._run(jsgen.send_only(h["device"], "ipconfig /renew")) or "pedido")
         def resolved(spec):
             try:
                 return planmod.resolve_ports(spec, ports_for.get(spec["device"], {}))

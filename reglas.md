@@ -46,7 +46,8 @@ Reglas de formato:
 - Separador: guion (`SW-Madrid`).
 - **Nunca nombres `CopyNN` / `CopySW-…`**: son los que pone Packet Tracer al copiar y pegar un equipo; no son una convención.
   Si el asistente duplica algo, lo renombra según estas reglas.
-- Los equipos finales con IP por DHCP se llaman igual (por el número que les corresponde), ver sección 2.
+- **Con DHCP los equipos NO se renombran** (dicho por el usuario, 2026-10-06): se dejan con el nombre que les pone Packet Tracer
+  (`PC0`, `PC1`…, `Laptop0`…). El nombre por último octeto es **solo para IP estática**. Esto sustituye a lo que se dedujo de la Práctica 2.
 - Hostname IOS de los switches: **no se cambia** (se queda `Switch`); solo se pone el nombre en el mapa. Los switches no llevan
   ninguna configuración por consola en las prácticas sin VLAN (Práctica 2). Routers: **PENDIENTE**.
 - Los nombres **deben ser únicos** (restricción técnica de la 6.0.1: los duplicados se apilan invisibles y no se pueden cablear).
@@ -75,7 +76,14 @@ P1C: Centro 10–14, Vallecas 15–20, Arguelles 21–24, Usera 25–28 (en cada
 2. Dentro de cada sede, primero los **portátiles** y después los **PCs**.
 3. Dentro de cada fila, el número **más bajo a la derecha** y el más alto a la izquierda.
 
-- Equipos finales por DHCP o estáticos: lo dice cada enunciado. Estáticos: IP = `192.168.1.<nombre>`.
+**Ojo — Práctica DNS (2026-10-21), colocada a mano por el usuario, numera al revés que las anteriores:** sede de **arriba** primero
+(Goya 10–14, Sol 15–19, GranVia 20–25, Moncloa 26–31), dentro de cada sede **primero los PCs y luego los portátiles**, y en cada fila
+**de izquierda a derecha subiendo** (10, 11, 12). Gracias a eso, el puerto `Fa<n>/1` del switch de sede va al equipo n-ésimo en orden
+numérico. Si el usuario ya ha colocado los equipos, se respeta su numeración. Para construir desde cero, preguntar cuál de los dos órdenes usar
+hasta que se repita uno de ellos.
+
+- **DHCP o estática** (dicho por el usuario, 2026-10-06): si el enunciado menciona DHCP, los equipos van por DHCP y **no se renombran**.
+  Si no menciona DHCP, van con **IP estática** y se renombran por el último octeto. Estáticos: IP = `192.168.1.<nombre>`.
 - **Qué se configura en un equipo final** (PC o portátil, puerto `FastEthernet0`), y nada más:
   - Estático: IP `<red>.<nombre>`, máscara de la clase, gateway `.1`, DNS = IP del servidor DNS si lo hay.
   - DHCP: solo marcar DHCP; IP, máscara y gateway los entrega el servidor.
@@ -144,9 +152,11 @@ Los switches son `Switch-PT-Empty` con módulos `PT-SWITCH-NM-1CFE` (un puerto `
 - Pool DHCP (`serverPool`): gateway `192.168.1.1`, sin DNS (`0.0.0.0`), **inicio en `.10`** (los equipos empiezan siempre en la 10).
   *Nota:* en el archivo de la Práctica 2 el pool empezaba en `.3` y los equipos recibieron `.4`–`.14`; no es la costumbre, es el valor
   que quedó en ese ejercicio.
-- La 6.0.1 solo admite IP inicial y final del pool; la máscara no se puede cambiar.
-- Para que con DHCP el nombre coincida con la IP, pedir la IP (`ipconfig /renew`) **en orden de nombre** (10, 11, 12…): PT reparte
-  las direcciones por orden de petición. *(Hipótesis del asistente a partir de los datos de la Práctica 2; sin comprobar aún.)*
+- El pool se configura con red y máscara, IP inicial y final, gateway y DNS (`pt_dhcp_server`; desde el 2026-10-22 también la máscara y
+  pools adicionales con `pool`). *(Antes se creía que la máscara no se podía cambiar: era una firma mal probada, ver `NOTAS.md`.)*
+- *(Ya no hace falta: con DHCP no se renombra, ver sección 1.)* Si alguna vez se quiere que nombre e IP coincidan con DHCP, hay que pedir
+  la IP (`ipconfig /renew`) **en orden de nombre** (10, 11, 12…): PT reparte las direcciones por orden de petición. *(Comprobado el 2026-10-05 en la Práctica 2B: 19 equipos pidiendo de uno en uno reciben 19 IP
+  seguidas. Si alguno pidió antes por su cuenta, su concesión sigue ocupada y todo se desplaza: ver `NOTAS.md`.)*
 - Dominio / sufijo DNS: **PENDIENTE** · Registros DNS que siempre se crean: **PENDIENTE** (se verá en la práctica de DNS).
 
 ## 6. Seguridad y credenciales (solo laboratorio)
@@ -225,6 +235,7 @@ Los enunciados son un **esquema de puntos y subpuntos**, y la jerarquía dice c�
   Word los niveles se pierden (todas las viñetas salen iguales): la jerarquía está en la **negrita** y en la sangría, no en el nivel de lista.
   Si hay duda, pedir captura del enunciado.
 - En el título, «N nodos redes LAN» cuenta **todos los switches**, incluido el de servidores (P1C: «5 nodos» = 4 sedes + `SW-ServerMadrid`).
+  *No siempre:* la Práctica 2B dice «3 nodos» y tiene 3 sedes + `SW-ServidorDHCP` (4 switches). Manda la lista de switches, no el número del título.
 - **«Switch PT Empty:»** con subpuntos = todos los switches de la lista son de ese modelo (puede aparecer dos veces: sedes y servidores):
   - `SW-<SEDE> (n pc, m portátiles)` = un switch por sede con esos equipos finales colgando de él.
   - `SW-Servidor<SERVICIO>` = **switch intermedio propio del servidor**. Es la pieza clave del esquema: el servidor se conecta SOLO a ese
@@ -264,3 +275,8 @@ Decisiones nuevas (fecha · regla · motivo). El asistente las anota directament
 |---|---|---|
 | 2026-10-03 | El asistente anota las costumbres aprendidas sin pedir confirmación; solo informa de lo anotado | El usuario no quiere confirmar cada regla |
 | 2026-10-03 | La carpeta `ejemplos/` (enunciados y trabajos de clase) no se sube a GitHub y se borra al terminar | Material de clase, solo para aprender |
+| 2026-10-06 | Con DHCP no se renombran los equipos (se quedan `PC0`, `Laptop0`…); sin mención de DHCP, IP estática y nombre = último octeto | Explicado por el usuario |
+| 2026-10-06 | El asistente hace todas las actividades de Cisco (enunciado en `Ejercicios/`); la documentación la hace el usuario a mano | Decisión del usuario |
+| 2026-10-21 | Práctica DNS: el asistente solo monta la estructura (equipos, switches, cables, IPs, notas); el servicio DNS y sus registros los configura el usuario | Quiere aprender la interfaz de DNS |
+| 2026-10-21 | Si el usuario deja la práctica a medias en PT, el asistente continúa sobre lo que hay (posiciones y numeración suyas), sin rehacerlo | Práctica DNS |
+| 2026-10-22 | `PRUEBAS_EN_CLASE.md` es el plan de mejoras con el que se trabaja ahora (puertos, capturas de ventanas, servicios). Cuando haya capturas automáticas, el asistente podrá **ayudar con la documentación** de las prácticas (hasta ahora solo la hacía el usuario) | Dicho por el usuario |
