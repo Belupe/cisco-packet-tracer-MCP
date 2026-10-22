@@ -79,8 +79,6 @@ Archivo `.vscode/mcp.json` (o *MCP: Add Server* → stdio):
 ```
 Inicia el servidor desde el botón *Start* que VS Code muestra sobre la entrada y activa las herramientas en el chat (modo Agent).
 
-> Cierra `servidor.ps1` / `servidor.py` del prototipo si siguen abiertos: usan el mismo puerto 54321.
-
 ## 3. Uso diario
 1. Abre Packet Tracer 6.0.1 y un archivo (nuevo o existente).
 2. En el Script Module pulsa **Start** (ventana "PT-MCP local" abierta). El servidor MCP lo arranca tu cliente
@@ -111,7 +109,7 @@ Después reinicia Claude Code (o `/reload-skills`) y comprueba con `/skills`.
 | `pt_status` dice "PT no está conectado" | Módulo parado o ventana "PT-MCP local" cerrada | *Stop* y *Start* en el Script Module; deja la ventana abierta |
 | Ventana "PT-MCP local" en blanco | PT arrancó el módulo antes que el servidor MCP | Espera ~3 s (reintenta solo) o pulsa Stop/Start |
 | El panel muestra `HTTP 401` | El servidor MCP se reinició y cambió el token | Recarga: Stop/Start del módulo |
-| Error por puerto 54321 en uso | `servidor.ps1`/`servidor.py` del prototipo abiertos, u otra instancia | Ciérralos; o usa `--port 54400` en `args` y cambia `URL` en `script_engine.js` |
+| Error por puerto 54321 en uso | Otra instancia del servidor MCP (otra sesión) | Ciérrala; o usa `--port 54400` en `args` y cambia `URL` en `script_engine.js` |
 | Las herramientas dan *timeout* | PT ocupado (simulación pesada) o ventana Debug abierta con un error | Cierra la ventana Debug del módulo y reintenta |
 | `ya existe un dispositivo llamado X` | Nombre repetido (la 6.0.1 permitiría duplicados invisibles y no cablearía) | Usa otro nombre o `pt_remove_device` |
 | `PT rechazo el cable` | Puerto ocupado o nombre de puerto incorrecto | `pt_list_ports` y usa `pt_connect` (elige puertos libres solo) |

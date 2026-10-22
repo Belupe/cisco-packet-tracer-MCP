@@ -1,4 +1,4 @@
-"""Pruebas offline de las herramientas de PRUEBAS_EN_CLASE.md (puertos, capturas, servicios). Sin Packet Tracer."""
+"""Pruebas offline de las herramientas de puertos, capturas de ventanas y servicios de servidor. Sin Packet Tracer."""
 import base64
 import io
 import json

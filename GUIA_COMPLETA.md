@@ -81,7 +81,7 @@ El servidor ejecuta JavaScript dentro de Packet Tracer, así que es una superfic
 ## 5. Qué es seguro y qué no (mapa de confianza)
 | Funcionalidad | Estado |
 |---|---|
-| Crear/mover/renombrar/borrar dispositivos, cablear, IP en PCs, consola de router, ping | ✅ Probado en tu PT (con el prototipo `pt.ps1`) |
+| Crear/mover/renombrar/borrar dispositivos, cablear, IP en PCs, consola de router, ping | ✅ Probado en tu PT |
 | Servidor MCP + puente con token, panel con token | ⚠️ Probado solo con panel simulado; **falta probarlo en PT real** |
 | `pt_build_topology`, `pt_connect` (puertos automáticos), `@VECINO` | ⚠️ Probado solo con puente simulado |
 | `pt_router_config` / `pt_switch_config` (genera IOS) | ✅ El IOS generado es estándar; ⚠️ falta ejecutarlo en PT |
@@ -118,7 +118,6 @@ pt601_mcp/              EL PRODUCTO (servidor MCP)
   extension/            lo que va dentro de Packet Tracer (panel + script engine)
 skill/SKILL.md          skill de Claude (flujo de trabajo y reglas)
 tests/                  pruebas automáticas sin Packet Tracer
-prototipo/              prototipo previo (PowerShell/Python), útil para pruebas sueltas con pt.ps1
 sondeo/                 scripts que usamos para descubrir la API de la 6.0.1
 documentación/          ayuda local de Packet Tracer 6.0.1
 ```

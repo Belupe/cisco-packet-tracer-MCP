@@ -12,7 +12,7 @@ cómo se reparten IPs, VLANs, puertos y posiciones. Manda por encima de los valo
   `jsgen.py` (JavaScript para PT), `ios.py` (comandos IOS), `plan.py` (planes JSON), `catalog.py` (modelos/cables),
   `extension/` (panel + script engine que se pegan/cargan en PT).
 - `tests/` — pruebas sin PT: `python3 -m unittest discover -s tests -v` (o con el python portátil del usuario).
-- `skill/SKILL.md` — skill para el asistente que use el MCP. `prototipo/`, `sondeo/` — herramientas de descubrimiento.
+- `skill/SKILL.md` — skill para el asistente que use el MCP. `sondeo/` — scripts de descubrimiento de la API.
 - `documentación/` — ayuda local de PT 6.0.1 (HTML). No la modifiques.
 
 ## Reglas de trabajo

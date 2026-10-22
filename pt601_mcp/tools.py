@@ -773,7 +773,7 @@ class Tools:
         data = self._map_png()
         return Rich("OK mapa guardado en %s" % self._save_png(data, args.get("filename"), "mapa"), [data])
 
-    # ---- ventanas de los equipos (bloque 2 de PRUEBAS_EN_CLASE.md) -------
+    # ---- ventanas de los equipos: abrir, navegar y capturar -------------
     def _ui(self, fn, *a):
         try:
             return getattr(self.ui, fn)(*a)
