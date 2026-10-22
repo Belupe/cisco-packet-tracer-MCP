@@ -494,3 +494,11 @@ trabajando a la vez en la pestaña Config de un router, la consola queda en `(co
   proveedor queda dentro del túnel) y entre VLAN de la misma sede con TTL 127. Desde el servidor del proveedor, `172.16.10.10` es inalcanzable:
   esas redes solo existen a través de la VPN. Sin NAT en los 2811, las VLAN no salen a `8.8.8.8` (esperado).
 - Herramienta nueva `pt_vpn_ipsec` (un extremo cada vez) e `ios.ipsec_vpn`. 2811 marcado como verificado en el catálogo. 40 herramientas, 78 pruebas.
+
+## 2026-10-22: interfaces gráficas de la 6.0.1 (según la ayuda local; sin comprobar en PT real)
+- Prioridad del usuario: las **interfaces gráficas** de los equipos (qué ventana abrir y cómo usarla); la terminal/CLI queda en segundo plano.
+- En la 6.0.1 los **servicios de un servidor cuelgan de Config → SERVICES** (no hay pestaña *Services* aparte como en PT 8/9, que usa el proyecto de referencia).
+  Pestañas que menciona la ayuda: Config, CLI, Desktop (y Physical, usada con éxito). Sin *Attributes* ni *Programming*.
+- Campos de la ventana de una interfaz: router (Port Status, IP, máscara, Tx Ring Limit; Ethernet: MAC, Bandwidth, Duplex; serie: Clock Rate); switch (Port Status,
+  Bandwidth, Duplex, VLAN Switch Mode, VLAN, Tx Ring Limit); PC (Port Status, Bandwidth, Duplex, MAC, SSID, IP, máscara, link local, IPv6). Mapa campo ↔ método de la API y
+  mapa tarea ↔ ventana en `PRUEBAS_EN_CLASE.md` (1.7 y 2.8). Sin método conocido para *Tx Ring Limit* ni *VLAN Switch Mode* de puerto.
